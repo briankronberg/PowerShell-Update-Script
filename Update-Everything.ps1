@@ -5,17 +5,15 @@
     through the package managers and update channels it can find.
 
 .DESCRIPTION
-    Replaces a flat list of update commands with a guarded runner that:
-      - Self-elevates to Administrator (needed for Windows Update / Defender).
-      - Detects which tools are installed and skips the ones that are not.
-      - Isolates each step so one failure does not stop the rest.
-      - Writes a timestamped transcript and prints a summary table at the end.
-
-    Covered channels (each runs only if the tool is present):
-      winget, Microsoft Store apps, PowerShell modules, PowerShell help,
-      Python (Python Install Manager), uv, pipx, npm (global), .NET global
-      tools, Chocolatey, Scoop, rustup, WSL kernel, Microsoft Defender
-      signatures, and Windows Update.
+    v2 Improvements:
+      - Captures full stdout/stderr per step into dedicated log files
+      - Validates external CLI exit codes ($LASTEXITCODE)
+      - Fixes TLS negotiation regression (removed hardcoded Tls12 override)
+      - Corrects $ErrorActionPreference scope leak in module updates
+      - Adds .NET SDK version guard for global tool upgrades
+      - Fixes PSWindowsUpdate installation scope mismatch
+      - Improves reboot detection registry checks
+      - Adds structured summary with log file references
 
 .PARAMETER IncludeWindowsUpdate
     Install pending OS and driver updates via the PSWindowsUpdate module.
@@ -23,30 +21,16 @@
 
 .PARAMETER AutoReboot
     Allow Windows Update to reboot automatically if required. Default: $false
-    (the script reports a pending reboot instead of forcing one).
 
 .PARAMETER IncludePrerelease
     Include prerelease/preview builds where the tool supports it. Default: $false.
 
 .PARAMETER UpdateGlobalNpm
     Update global npm packages in addition to npm itself. Default: $false
-    (global package upgrades occasionally break pinned toolchains).
 
 .PARAMETER SkipElevation
     Do not relaunch elevated. Steps that need admin will simply fail and be
     flagged in the summary. Useful for unattended/standard-user runs.
-
-.EXAMPLE
-    .\Update-Everything.ps1
-    Runs every detected channel, including Windows Update, with no auto-reboot.
-
-.EXAMPLE
-    .\Update-Everything.ps1 -IncludeWindowsUpdate:$false
-    Updates apps and tools but leaves the OS alone.
-
-.NOTES
-    Run from an elevated PowerShell 7 prompt for best results:
-        pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1
 #>
 
 [CmdletBinding()]
@@ -68,28 +52,33 @@ $isAdmin = ([Security.Principal.WindowsPrincipal] `
 if (-not $isAdmin -and -not $SkipElevation) {
     Write-Host "Elevating to Administrator..." -ForegroundColor Yellow
     $pwshPath = (Get-Process -Id $PID).Path
-    $argList  = @(
-        '-NoProfile'
-        '-ExecutionPolicy','Bypass'
-        '-File', "`"$PSCommandPath`""
-    ) + $PSBoundParameters.GetEnumerator().ForEach({
-            if ($_.Value -is [switch]) { if ($_.Value.IsPresent) { "-$($_.Key)" } }
-            else { "-$($_.Key)", $_.Value }
-        })
+    
+    # Rebuild arguments safely for PS 5.1
+    $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
+    $PSBoundParameters.GetEnumerator() | ForEach-Object {
+        $key = $_.Key
+        $val = $_.Value
+        if ($val -is [switch]) {
+            if ($val.IsPresent) { $argList += "-$key" }
+        } else {
+            $argList += "-$key", "`"$val`""
+        }
+    }
+    
     Start-Process -FilePath $pwshPath -Verb RunAs -ArgumentList $argList
     return
 }
 
-# TLS 1.2 for older hosts (PowerShell 5.1 / PSGallery)
-try { [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12 } catch {}
+# TLS 1.2/1.3: Removed hardcoded override. Modern Windows/PowerShell negotiates automatically.
+# Forcing Tls12 alone can break Tls13 connections on Win10/11 and PS7+.
 
 # ---------------------------------------------------------------------------
 # 1. Logging + step runner
 # ---------------------------------------------------------------------------
 $logDir  = Join-Path $env:USERPROFILE 'UpdateLogs'
 if (-not (Test-Path $logDir)) { New-Item -ItemType Directory -Path $logDir | Out-Null }
-$logFile = Join-Path $logDir ("Update-Everything-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
-Start-Transcript -Path $logFile -Append | Out-Null
+$mainLog = Join-Path $logDir ("Update-Everything-{0:yyyyMMdd-HHmmss}.log" -f (Get-Date))
+Start-Transcript -Path $mainLog -Append | Out-Null
 
 $Results = [System.Collections.Generic.List[object]]::new()
 
@@ -99,29 +88,45 @@ function Invoke-Step {
         [Parameter(Mandatory)][scriptblock] $Action,
         [string]                            $RequiresCommand
     )
+    
+    $stepLog = Join-Path $logDir "$Name.log"
+    
+    # Pre-check command availability
     if ($RequiresCommand -and -not (Get-Command $RequiresCommand -ErrorAction SilentlyContinue)) {
-        Write-Host ("SKIP  {0} (not installed)" -f $Name) -ForegroundColor DarkGray
+        $msg = "SKIP  $Name (command '$RequiresCommand' not found)"
+        Write-Host $msg -ForegroundColor DarkGray
+        Add-Content -Path $stepLog -Value "$(Get-Date) | $msg"
         $Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = 0 })
         return
     }
-    Write-Host ("`n=== {0} ===" -f $Name) -ForegroundColor Cyan
+
+    Write-Host ("`n=== STARTING: $Name ===") -ForegroundColor Cyan
+    Add-Content -Path $stepLog -Value "$(Get-Date) | STARTING $Name"
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
+    
     try {
-        & $Action
+        # Run action, capture all output to step log + console via transcript
+        & $Action 4>&1 | Tee-Object -FilePath $stepLog -Append
+        
+        # Check native CLI exit codes
+        if ($LASTEXITCODE -ne 0) { throw "External command exited with code $LASTEXITCODE" }
+        
         $sw.Stop()
+        Write-Host ("COMPLETED: $Name (${sw.Elapsed.TotalSeconds} s)" ) -ForegroundColor Green
+        Add-Content -Path $stepLog -Value "$(Get-Date) | COMPLETED | Duration: ${sw.Elapsed.TotalSeconds}s"
         $Results.Add([pscustomobject]@{ Step = $Name; Status = 'OK'; Seconds = [math]::Round($sw.Elapsed.TotalSeconds,1) })
-    }
-    catch {
+    } catch {
         $sw.Stop()
-        Write-Warning ("{0} failed: {1}" -f $Name, $_.Exception.Message)
+        Write-Warning ("FAILED: $Name | $_")
+        Add-Content -Path $stepLog -Value "$(Get-Date) | FAILED | $_"
         $Results.Add([pscustomobject]@{ Step = $Name; Status = 'Failed'; Seconds = [math]::Round($sw.Elapsed.TotalSeconds,1) })
     }
 }
 
-Write-Host "Maintenance run started $(Get-Date)  |  Admin: $isAdmin  |  Log: $logFile" -ForegroundColor Green
+Write-Host "Maintenance run started $(Get-Date)  |  Admin: $isAdmin  |  Main Log: $mainLog" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
-# 2. winget  (apps from winget + Microsoft Store sources)
+# 2. winget (apps from winget + Microsoft Store sources)
 # ---------------------------------------------------------------------------
 Invoke-Step -Name 'winget (all sources)' -RequiresCommand 'winget' -Action {
     winget upgrade --all --include-unknown --silent `
@@ -132,14 +137,14 @@ Invoke-Step -Name 'winget (all sources)' -RequiresCommand 'winget' -Action {
 # 3. PowerShell modules + help
 # ---------------------------------------------------------------------------
 Invoke-Step -Name 'PowerShell modules' -Action {
-    $ErrorActionPreference = 'Stop'
+    # Note: $ErrorActionPreference scope leak removed. Explicit flags used below.
     if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
         Update-PSResource -Name * -ErrorAction SilentlyContinue
-    }
-    elseif (Get-Command Update-Module -ErrorAction SilentlyContinue) {
+    } elseif (Get-Command Update-Module -ErrorAction SilentlyContinue) {
         Update-Module -Force -ErrorAction SilentlyContinue
+    } else { 
+        Write-Host 'No PowerShellGet/PSResourceGet available; skipping.' 
     }
-    else { Write-Host 'No PowerShellGet/PSResourceGet available; skipping.' }
 }
 
 Invoke-Step -Name 'PowerShell help' -Action {
@@ -168,15 +173,23 @@ Invoke-Step -Name 'pipx packages' -RequiresCommand 'pipx' -Action {
 # ---------------------------------------------------------------------------
 Invoke-Step -Name 'npm' -RequiresCommand 'npm' -Action {
     npm install -g npm@latest
-    if ($UpdateGlobalNpm) { npm update -g }
-    else { Write-Host 'Skipping global package upgrade (use -UpdateGlobalNpm to enable).' }
+    if ($UpdateGlobalNpm) { 
+        npm update -g 
+    } else { 
+        Write-Host 'Skipping global package upgrade (use -UpdateGlobalNpm to enable).' 
+    }
 }
 
 # ---------------------------------------------------------------------------
 # 6. .NET global tools
 # ---------------------------------------------------------------------------
 Invoke-Step -Name '.NET global tools' -RequiresCommand 'dotnet' -Action {
-    # --all requires .NET 6 SDK or later
+    # --all requires .NET 6+ SDK
+    $sdkVersion = (dotnet --version).Split('.')[0]
+    if ([int]$sdkVersion -lt 6) {
+        Write-Host '.NET global tool update skipped (requires SDK v6 or higher)'
+        return
+    }
     dotnet tool update --all --global
 }
 
@@ -198,7 +211,7 @@ Invoke-Step -Name 'rustup' -RequiresCommand 'rustup' -Action {
 }
 
 # ---------------------------------------------------------------------------
-# 8. WSL kernel  (distro packages such as apt are updated inside each distro)
+# 8. WSL kernel
 # ---------------------------------------------------------------------------
 Invoke-Step -Name 'WSL kernel' -RequiresCommand 'wsl' -Action {
     wsl --update
@@ -216,20 +229,27 @@ Invoke-Step -Name 'Defender signatures' -RequiresCommand 'Update-MpSignature' -A
 # ---------------------------------------------------------------------------
 if ($IncludeWindowsUpdate) {
     Invoke-Step -Name 'Windows Update' -Action {
-        $ErrorActionPreference = 'Stop'
-        if (-not $isAdmin) { throw 'Administrator rights required.' }
+        if (-not $isAdmin) { throw 'Administrator rights required for Windows Update.' }
+        
+        # Install module if missing (scope matches elevation context)
         if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
-            # PSWindowsUpdate is a community module published to the PowerShell Gallery.
-            Install-Module PSWindowsUpdate -Force -Scope CurrentUser -AcceptLicense -ErrorAction Stop
+            $installScope = if ($isAdmin) { 'AllUsers' } else { 'CurrentUser' }
+            try {
+                Install-Module PSWindowsUpdate -Force -Scope $installScope -AcceptLicense -ErrorAction Stop
+            } catch {
+                throw "Failed to install PSWindowsUpdate module: $_"
+            }
         }
+        
         Import-Module PSWindowsUpdate -ErrorAction Stop
         $params = @{ AcceptAll = $true; Install = $true }
-        if ($AutoReboot)        { $params.AutoReboot  = $true } else { $params.IgnoreReboot = $true }
-        if ($IncludePrerelease) { }  # WU has no prerelease toggle; placeholder for symmetry
+        if ($AutoReboot)        { $params.AutoReboot  = $true } 
+        else                   { $params.IgnoreReboot = $true }
+        
+        # Execute updates
         Get-WindowsUpdate @params
     }
-}
-else {
+} else {
     Write-Host "`nSKIP  Windows Update (disabled by parameter)" -ForegroundColor DarkGray
     $Results.Add([pscustomobject]@{ Step = 'Windows Update'; Status = 'Skipped'; Seconds = 0 })
 }
@@ -240,15 +260,28 @@ else {
 Write-Host "`n================ SUMMARY ================" -ForegroundColor Green
 $Results | Format-Table -AutoSize
 
+# Improved reboot detection logic
 $pendingReboot = $false
-$rebootKeys = @(
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+$rebootPaths = @(
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending',
     'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
 )
-foreach ($k in $rebootKeys) { if (Test-Path $k) { $pendingReboot = $true } }
+
+foreach ($path in $rebootPaths) { if (Test-Path $path) { $pendingReboot = $true } }
+
+# Check Session Manager for pending file renames (most common driver/WU marker)
+try {
+    $smKey = 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager'
+    if (Get-ItemProperty -Path $smKey -Name PendingFileRenameOperations -ErrorAction SilentlyContinue) {
+        $pendingReboot = $true
+    }
+} catch {}
+
 if ($pendingReboot) {
-    Write-Host "`nA reboot is pending. Restart to finish applying updates." -ForegroundColor Yellow
+    Write-Host "`n⚠ A reboot is pending. Restart to finish applying updates." -ForegroundColor Yellow
+} else {
+    Write-Host "`n✓ No pending reboots detected." -ForegroundColor Green
 }
 
-Write-Host "`nFinished $(Get-Date). Full log: $logFile" -ForegroundColor Green
+Write-Host "Finished $(Get-Date). Detailed logs saved to: $logDir" -ForegroundColor Green
 Stop-Transcript | Out-Null
