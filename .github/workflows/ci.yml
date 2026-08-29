@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        shell: pwsh
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.5.0 -Scope CurrentUser -Force
+          Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
+
+      - name: Lint
+        shell: pwsh
+        run: |
+          $findings = Invoke-ScriptAnalyzer -Path .\Update-Everything.ps1 `
+              -Settings .\PSScriptAnalyzerSettings.psd1
+          $findings | Format-Table -AutoSize | Out-String | Write-Host
+          if ($findings) { throw "$($findings.Count) analyzer finding(s)" }
+
+      - name: Test
+        shell: pwsh
+        run: |
+          $cfg = New-PesterConfiguration
+          $cfg.Run.Path = './tests'
+          $cfg.Run.Exit = $true
+          $cfg.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $cfg
