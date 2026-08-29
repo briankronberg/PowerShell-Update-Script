@@ -35,7 +35,21 @@ BeforeDiscovery {
     # or moves pinned toolchains, so turning one on has to be a deliberate act.
     $DefaultOffSwitches = @('AutoReboot', 'IncludePrerelease', 'UpdateGlobalNpm', 'SkipElevation')
 
+    # Steps that cannot possibly work unelevated. Each must carry -RequiresAdmin
+    # so an unelevated run reports "skipped, needs admin" instead of a
+    # permissions error that reads like a bug in the script.
+    $AdminOnlySteps = @('Windows Update', 'Defender signatures', 'PowerShell 7 (latest)')
+
     $HasAnalyzer = [bool] (Get-Module PSScriptAnalyzer -ListAvailable)
+
+    # Every PowerShell file in the repo gets linted, not just the script.
+    $LintTargets = @(
+        'Update-Everything.ps1'
+        'test.ps1'
+        'tests/Update-Everything.Tests.ps1'
+        'tests/Update-Everything.Functions.Tests.ps1'
+        'tests/Set-PwshAsWindowsTerminalDefault.Tests.ps1'
+    )
 }
 
 BeforeAll {
@@ -61,6 +75,40 @@ BeforeAll {
     }
 
     $script:DeclaredParameters = $script:Ast.ParamBlock.Parameters
+
+    # Every Invoke-Step call with the switches it was given, so the suite can ask
+    # which steps are marked admin-only.
+    $script:StepCalls = $script:Ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.CommandAst] -and
+            $node.GetCommandName() -eq 'Invoke-Step'
+        }, $true) | ForEach-Object {
+        $elements = $_.CommandElements
+        $name = $null
+        $requiresAdmin = $false
+        for ($i = 0; $i -lt $elements.Count; $i++) {
+            if ($elements[$i] -isnot [System.Management.Automation.Language.CommandParameterAst]) { continue }
+            switch ($elements[$i].ParameterName) {
+                'Name'          { if ($i + 1 -lt $elements.Count) { $name = $elements[$i + 1].Value } }
+                'RequiresAdmin' { $requiresAdmin = $true }
+            }
+        }
+        [pscustomobject]@{ Name = $name; RequiresAdmin = $requiresAdmin }
+    }
+
+    # Where the dot-source guard sits among the top-level statements.
+    $script:TopLevelStatements = $script:Ast.EndBlock.Statements
+    $script:GuardIndex = -1
+    $script:GuardLine = [int]::MaxValue
+    for ($i = 0; $i -lt $script:TopLevelStatements.Count; $i++) {
+        $statement = $script:TopLevelStatements[$i]
+        if ($statement -is [System.Management.Automation.Language.IfStatementAst] -and
+            $statement.Extent.Text -match 'MyInvocation\.InvocationName') {
+            $script:GuardIndex = $i
+            $script:GuardLine = $statement.Extent.StartLineNumber
+            break
+        }
+    }
 }
 
 Describe 'Update-Everything.ps1' -Tag 'Static' {
@@ -163,6 +211,95 @@ Describe 'Update-Everything.ps1' -Tag 'Static' {
         It 'names every step with a non-empty string' {
             $script:StepNames | Should-All { $_ -is [string] -and $_.Trim() }
         }
+
+        It 'marks <_> as requiring administrator' -ForEach $AdminOnlySteps {
+            $stepName = $_
+            $call = $script:StepCalls | Where-Object { $_.Name -eq $stepName }
+
+            $call | Should-NotBeNull -Because "the step '$stepName' should still exist"
+            $call.RequiresAdmin | Should-BeTrue -Because 'it cannot work unelevated'
+        }
+    }
+
+    # The two behavioural test files dot-source this script. That is only safe
+    # while the guard holds, so the guard itself is asserted here rather than
+    # assumed.
+    Context 'Safe to dot-source' {
+
+        It 'has a dot-source guard' {
+            $script:GuardIndex | Should-BeGreaterThanOrEqual 0 -Because 'dot-sourcing must not start a maintenance run'
+        }
+
+        It 'defines nothing but functions before the guard' {
+            # A single stray statement above the guard would execute on every
+            # dot-source, which is how a test run ends up installing software.
+            $before = $script:TopLevelStatements[0..($script:GuardIndex - 1)]
+            $offenders = $before |
+                Where-Object { $_ -isnot [System.Management.Automation.Language.FunctionDefinitionAst] } |
+                ForEach-Object { "line $($_.Extent.StartLineNumber): $($_.Extent.Text.Split([Environment]::NewLine)[0])" }
+
+            $offenders | Should-BeNull -Because "these run on every dot-source:`n$($offenders -join "`n")"
+        }
+
+        It 'runs no update step before the guard' {
+            $firstStepLine = $script:Ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst] -and
+                    $node.GetCommandName() -eq 'Invoke-Step'
+                }, $true) |
+                ForEach-Object { $_.Extent.StartLineNumber } |
+                Sort-Object |
+                Select-Object -First 1
+
+            $firstStepLine | Should-BeGreaterThan $script:GuardLine
+        }
+    }
+
+    # Set-StrictMode would catch undefined variable reads at runtime, but it also
+    # makes a missing property fatal, and this script legitimately probes for
+    # optional keys in settings.json. Static analysis buys the useful half
+    # without the breakage.
+    Context 'Variable hygiene' {
+
+        It 'reads no variable it never assigns' {
+            $automatic = @(
+                'true', 'false', 'null', '_', 'PSItem', 'args', 'input', 'this', 'PSCmdlet',
+                'MyInvocation', 'PSScriptRoot', 'PSCommandPath', 'PID', 'Error', 'Matches',
+                'LASTEXITCODE', 'PSVersionTable', 'ErrorActionPreference', 'ProgressPreference',
+                'WarningPreference', 'VerbosePreference', 'InformationPreference', 'DebugPreference',
+                'ConfirmPreference', 'WhatIfPreference', 'PWD', 'HOME', 'Host', 'ExecutionContext',
+                'PSBoundParameters', 'PSDefaultParameterValues', 'IsWindows', 'IsLinux', 'IsMacOS',
+                'IsCoreCLR', 'env', 'OutputEncoding', 'PSEdition', 'PSCulture', 'PSUICulture',
+                'ShellId', 'NestedPromptLevel', 'StackTrace', 'switch', 'foreach'
+            )
+
+            $bare = { param($p) ($p -replace '^(script|global|local|private):', '') }
+
+            $defined = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+            foreach ($n in $script:Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.AssignmentStatementAst] }, $true)) {
+                foreach ($v in $n.Left.FindAll({ param($x) $x -is [System.Management.Automation.Language.VariableExpressionAst] }, $true)) {
+                    [void] $defined.Add((& $bare $v.VariablePath.UserPath))
+                }
+            }
+            foreach ($n in $script:Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.ParameterAst] }, $true)) {
+                [void] $defined.Add((& $bare $n.Name.VariablePath.UserPath))
+            }
+            foreach ($n in $script:Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.ForEachStatementAst] }, $true)) {
+                [void] $defined.Add((& $bare $n.Variable.VariablePath.UserPath))
+            }
+
+            $undefined = @(
+                foreach ($v in $script:Ast.FindAll({ param($x) $x -is [System.Management.Automation.Language.VariableExpressionAst] }, $true)) {
+                    $name = & $bare $v.VariablePath.UserPath
+                    if ($name -in $automatic) { continue }
+                    if ($v.VariablePath.IsDriveQualified) { continue }
+                    if ($defined.Contains($name)) { continue }
+                    "line $($v.Extent.StartLineNumber): `$$name"
+                }
+            ) | Sort-Object -Unique
+
+            $undefined | Should-BeNull -Because "a typo'd variable reads as `$null:`n$($undefined -join "`n")"
+        }
     }
 }
 
@@ -196,9 +333,22 @@ Describe 'Repository documentation' -Tag 'Docs' {
 
 Describe 'PSScriptAnalyzer' -Tag 'Lint' -Skip:(-not $HasAnalyzer) {
 
-    It 'reports no errors or warnings' {
-        $findings = Invoke-ScriptAnalyzer -Path $script:ScriptPath `
-            -Settings (Join-Path $script:RepoRoot 'PSScriptAnalyzerSettings.psd1')
+    It 'reports no errors or warnings in <_>' -ForEach $LintTargets {
+        $relative = $_
+        $path = Join-Path $script:RepoRoot $relative
+
+        # Pester puts -ForEach data in BeforeDiscovery variables that the
+        # analyzer cannot see being consumed, so every test file trips
+        # PSUseDeclaredVarsMoreThanAssignments. Excluded for tests only -- in the
+        # script itself an unused variable is still worth knowing about.
+        # Splatted, because -ExcludeRule rejects an empty array outright.
+        $extra = @{}
+        if ($relative -like 'tests*') {
+            $extra['ExcludeRule'] = @('PSUseDeclaredVarsMoreThanAssignments')
+        }
+
+        $findings = Invoke-ScriptAnalyzer -Path $path `
+            -Settings (Join-Path $script:RepoRoot 'PSScriptAnalyzerSettings.psd1') @extra
 
         $detail = ($findings | ForEach-Object {
                 '{0}:{1} {2}' -f $_.RuleName, $_.Line, $_.Message

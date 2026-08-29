@@ -33,8 +33,57 @@ itself elevated unless `-SkipElevation` is passed.
 | `-SkipElevation` | off | Never relaunch elevated. Admin-only steps fail and are flagged in the summary. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
 
-Exit code is the number of **failed** steps. Steps that were skipped, or that
-finished with warnings, do not count.
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Every step succeeded or was skipped |
+| `1`–`63` | That many steps failed. Steps that finished with warnings completed, and do not count |
+| `64` | **Nothing was attempted** — the run could not become Administrator |
+
+`64` is deliberately outside the step-count range so a scheduled task or wrapper
+can tell "did not run" apart from "ran, and something failed".
+
+## Running without administrator rights
+
+The script checks whether elevation is *possible* before requesting it. If the
+account is not in the local Administrators group, or UAC is switched off, it
+stops immediately with an explanation and exit `64` rather than raising a
+consent prompt that cannot succeed:
+
+```
+WARNING: Cannot run elevated: This account is not a member of the local
+Administrators group, so Windows will not grant elevation.
+WARNING: Nothing has been changed. Re-run with -SkipElevation to run the steps
+that do not need administrator rights.
+```
+
+When membership *cannot* be determined — a domain group nested inside local
+Administrators, or a machine where the group cannot be read — the script
+attempts elevation anyway rather than refusing. Guessing "no" there would block
+legitimate administrators, so an unknown answer is treated as "try it".
+
+With `-SkipElevation`, the run proceeds and the steps that genuinely need admin
+— Windows Update, Defender signatures, the PowerShell 7 machine-wide install —
+are reported as skipped with that reason, instead of failing on a permissions
+error that reads like a bug:
+
+```powershell
+.\Update-Everything.ps1 -SkipElevation
+```
+
+### Execution policy
+
+The elevated relaunch passes `-ExecutionPolicy Bypass`, but the *first* launch
+obeys whatever policy is in force. On a machine set to `AllSigned` or
+`Restricted` the script is blocked before it runs, with a "not digitally signed"
+error. Start it like this instead:
+
+```bash
+powershell -ExecutionPolicy Bypass -File .\Update-Everything.ps1
+```
+
+Check the current setting with `Get-ExecutionPolicy -List`.
 
 ## Channels covered
 
@@ -65,11 +114,13 @@ of the file.
 ## Repository layout
 
 ```
-Update-Everything.ps1           the script
-test.ps1                        test runner, used locally and by CI
-PSScriptAnalyzerSettings.psd1   lint rules (5.1 + 7.0 compatibility)
-tests/                          Pester 6 suite
-.github/workflows/ci.yml        runs test.ps1 on windows-latest
+Update-Everything.ps1                          the script
+test.ps1                                       test runner, used locally and by CI
+PSScriptAnalyzerSettings.psd1                  lint rules (5.1 + 7.0 compatibility)
+tests/Update-Everything.Tests.ps1              static contract: parameters, help, docs, guard
+tests/Update-Everything.Functions.Tests.ps1    behaviour: logging, steps, reboot, elevation
+tests/Set-PwshAsWindowsTerminalDefault.Tests.ps1   the settings.json rewrite, in a sandbox
+.github/workflows/ci.yml                       runs test.ps1 on windows-latest
 ```
 
 ## Development
@@ -97,20 +148,51 @@ definitions), `Docs` (README and LICENSE stay in sync with the script) and
 
 ### How the tests work, and why
 
-The suite never dot-sources or executes `Update-Everything.ps1`. Running it to
-test it would elevate, install software and potentially reboot the machine doing
-the testing. Everything is asserted statically instead — through the PowerShell
-AST, and through `Get-Command` / `Get-Help`, which read a script's parameter
-block and help without running its body.
+Running this script to test it would elevate, install software and potentially
+reboot the machine doing the testing. So the suite never *runs* it. It works in
+two layers instead.
 
-That constraint is also why there is no code coverage metric: coverage requires
-executing the code under test.
-
-What it buys you is a contract that cannot drift silently. Add a parameter and
-the suite fails until it is documented in both the comment-based help and the
-README table. Flip a default so the script reboots or upgrades without being
-asked and the suite fails. Give two steps the same name — they would overwrite
+**Static checks** read the script without loading it — through the PowerShell
+AST, and through `Get-Command` / `Get-Help`, which report a script's parameter
+block and help without executing its body. These hold the contract: add a
+parameter and the suite fails until it is documented in both the comment-based
+help and the README table; flip a default so the script reboots without being
+asked and the suite fails; give two steps the same name — they would overwrite
 each other's log file — and the suite fails.
+
+**Behavioural checks** dot-source the script and call its functions directly.
+That is safe because of the dot-source guard: everything above it is a function
+definition, so
+
+```powershell
+. .\Update-Everything.ps1
+```
+
+loads the functions and returns without updating anything. The guard is not
+taken on trust — a static test asserts it exists, that every statement above it
+is a function definition, and that no `Invoke-Step` call appears before it. Put
+one stray executable line above the guard and that test fails, because such a
+line would run on every dot-source.
+
+File work goes to `TestDrive`, and `LOCALAPPDATA` is redirected there while the
+Windows Terminal tests run, so a real `settings.json` is never opened. Registry
+probes are mocked.
+
+There is no code coverage metric, for the same reason: measuring coverage
+requires executing the code under test.
+
+#### Why not `Set-StrictMode`?
+
+Most PowerShell style guides open a script with `Set-StrictMode -Version Latest`.
+It is not used here, deliberately. Strict mode makes reading a *missing property*
+fatal, and this script legitimately probes for optional keys in Windows
+Terminal's `settings.json` (`if ($cfg.profiles -and $cfg.profiles.list)`) — a
+file where those keys are frequently absent. Turning strict mode on would break
+that path on exactly the machines it exists to handle.
+
+The useful half is recovered statically instead: a test walks the AST and fails
+if the script ever reads a variable it never assigns, which is the typo class
+strict mode is really there to catch.
 
 History note: the first three commits are the v1 → v2 → v3 revisions of the
 script as it was developed, so `git log -p Update-Everything.ps1` shows why each

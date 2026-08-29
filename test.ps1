@@ -47,9 +47,12 @@ $config = New-PesterConfiguration
 $config.Run.Path         = Join-Path $PSScriptRoot 'tests'
 $config.Output.Verbosity = 'Detailed'
 
-# Report every failed assertion in a test, not just the first. A lint failure
-# listing all findings at once beats fixing them one run at a time.
-$config.Should.ErrorAction = 'Continue'
+# Should.ErrorAction is deliberately left at its default of 'Stop'. The first
+# failed assertion ends the test, which is what you want when tests hold one
+# logical assertion each: the failure names the thing that broke instead of
+# burying it under the consequences. 'Continue' only pays off for tests that
+# deliberately check several related things at once, and those read better split
+# up anyway.
 
 if ($Tag)        { $config.Filter.Tag = $Tag }
 if ($ExcludeTag) { $config.Filter.ExcludeTag = $ExcludeTag }

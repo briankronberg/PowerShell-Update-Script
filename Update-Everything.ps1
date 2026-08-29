@@ -79,16 +79,33 @@
     Update global npm packages in addition to npm itself. Default: $false
 
 .PARAMETER SkipElevation
-    Do not relaunch elevated. Steps that need admin will simply fail and be
-    flagged in the summary. Useful for unattended/standard-user runs.
+    Do not relaunch elevated. Steps marked as requiring administrator are
+    reported as skipped with that reason rather than failing on a permissions
+    error. Useful for unattended/standard-user runs.
 
 .PARAMETER LogRetentionDays
     Delete logs and settings.json backups in the log directory older than this
     many days. Default: 30. Set to 0 to keep everything.
 
 .OUTPUTS
-    Exits with the number of failed steps (0 when everything succeeded or was
-    skipped). 'Warning' steps do not count as failures.
+    Exit code:
+      0     every step succeeded or was skipped
+      1-63  that many steps failed ('Warning' steps completed and do not count)
+      64    nothing was attempted, because the run could not become
+            Administrator -- the account is not in the local Administrators
+            group, UAC is disabled, elevation was declined, or the script was
+            not running from a file. Distinct from a step count so a wrapper can
+            tell "did not run" from "ran and something failed".
+
+.NOTES
+    Elevation is checked before it is requested. A standard user gets a clear
+    explanation and exit 64 rather than a UAC prompt that cannot succeed. Run
+    with -SkipElevation to perform the steps that do not need admin.
+
+    Execution policy: the elevated relaunch passes -ExecutionPolicy Bypass, but
+    the first launch obeys whatever policy is in force. On a machine set to
+    AllSigned or Restricted, start it with:
+        powershell -ExecutionPolicy Bypass -File .\Update-Everything.ps1
 #>
 
 [CmdletBinding()]
@@ -105,18 +122,142 @@ param(
 )
 
 # ---------------------------------------------------------------------------
-# 0. Elevation
+# Functions
+#
+# Everything below is a definition. The executable part of the script starts
+# after the dot-source guard further down, so that
+#
+#     . .\Update-Everything.ps1
+#
+# defines these functions without updating anything. That is what makes the
+# script testable: the test suite loads it this way and exercises the functions
+# directly. Nothing above the guard may have a side effect.
 # ---------------------------------------------------------------------------
-$isAdmin = ([Security.Principal.WindowsPrincipal] `
-    [Security.Principal.WindowsIdentity]::GetCurrent()
-).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-if (-not $isAdmin -and -not $SkipElevation) {
+function Test-IsAdministrator {
+    # Split out so callers read as intent rather than as a WindowsPrincipal cast.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    ([Security.Principal.WindowsPrincipal] `
+        [Security.Principal.WindowsIdentity]::GetCurrent()
+    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+}
+
+function Test-UacEnabled {
+    # Whether Windows will offer a consent prompt at all. With UAC switched off,
+    # a non-elevated session cannot ask for elevation -- no prompt appears and
+    # Start-Process -Verb RunAs fails rather than escalating.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    try {
+        $value = (Get-ItemProperty -LiteralPath 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System' `
+            -Name EnableLUA -ErrorAction Stop).EnableLUA
+        return [bool] $value
+    } catch {
+        # Absent or unreadable: assume UAC is on, which is the Windows default.
+        # Guessing "off" here would refuse to run on a perfectly normal machine.
+        return $true
+    }
+}
+
+function Test-AdministratorGroupMember {
+    # Whether this account could become an administrator, as opposed to already
+    # being one. Returns $true, $false, or $null when it cannot be determined.
+    #
+    # The obvious implementation -- looking for S-1-5-32-544 in the current
+    # token's groups -- does not work, and fails in the dangerous direction. On
+    # a filtered (split) token Windows drops that SID entirely, so a genuine
+    # administrator reports as a standard user and the script would refuse to
+    # elevate someone who could have elevated perfectly well. Verified on a real
+    # machine: 'net localgroup Administrators' listed the user while
+    # WindowsIdentity.Groups did not contain the SID.
+    #
+    # So ask the group instead, by SID rather than by name, because
+    # 'Administrators' is localised. Anything unresolvable returns $null, and the
+    # caller treats unknown as "attempt it" rather than "refuse".
+    [CmdletBinding()]
+    param()
+
+    try {
+        $members = @(Get-LocalGroupMember -SID 'S-1-5-32-544' -ErrorAction Stop)
+    } catch {
+        # No LocalAccounts module, a domain controller, or an access denial.
+        return $null
+    }
+
+    $me = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    foreach ($member in $members) {
+        if ($member.SID.Value -eq $me) { return $true }
+    }
+
+    # A nested group could still grant membership, and resolving that needs a
+    # domain round trip. Unknown beats a wrong "no".
+    if ($members | Where-Object { $_.ObjectClass -eq 'Group' }) { return $null }
+
+    return $false
+}
+
+function Test-ElevationCapability {
+    # Decides, before anything is attempted, whether this run can become
+    # Administrator -- so the script can explain itself instead of raising a UAC
+    # prompt that cannot succeed, or hanging on one that never appears.
+    [CmdletBinding()]
+    param()
+
+    if (Test-IsAdministrator) {
+        return [pscustomobject]@{
+            IsElevated = $true
+            CanElevate = $true
+            Reason     = 'Already running as Administrator.'
+        }
+    }
+
+    # Only a definite $false blocks the run. $null means "could not tell", and
+    # guessing wrong here would refuse to run for a legitimate administrator.
+    if ((Test-AdministratorGroupMember) -eq $false) {
+        return [pscustomobject]@{
+            IsElevated = $false
+            CanElevate = $false
+            Reason     = 'This account is not a member of the local Administrators group, so Windows will not grant elevation. An administrator has to run the script, or use -SkipElevation to run the steps that do not need admin.'
+        }
+    }
+
+    if (-not (Test-UacEnabled)) {
+        return [pscustomobject]@{
+            IsElevated = $false
+            CanElevate = $false
+            Reason     = 'UAC (EnableLUA) is disabled, so this session cannot request elevation. Sign in with an elevated session, or use -SkipElevation.'
+        }
+    }
+
+    [pscustomobject]@{
+        IsElevated = $false
+        CanElevate = $true
+        Reason     = 'Elevation can be requested.'
+    }
+}
+
+function Invoke-SelfElevation {
+    # Relaunches this script elevated and exits with the child's exit code.
+    # Returns only if elevation could not be attempted.
+    [CmdletBinding()]
+    param(
+        # The caller's $PSBoundParameters. Inside a function $PSBoundParameters
+        # describes that function, so the script's own arguments have to be
+        # passed in explicitly or the elevated run loses them.
+        [Parameter(Mandatory)]
+        [System.Collections.IDictionary] $BoundParameters
+    )
+
     # $PSCommandPath is empty when the script was piped in or pasted rather than
     # run from a file, and there is then nothing to relaunch.
     if (-not $PSCommandPath) {
         Write-Error 'Cannot self-elevate: the script is not running from a file. Save it as a .ps1 and run it, or pass -SkipElevation.'
-        exit 1
+        exit 64
     }
 
     Write-Host "Elevating to Administrator..." -ForegroundColor Yellow
@@ -134,7 +275,7 @@ if (-not $isAdmin -and -not $SkipElevation) {
     }
     if (-not $hostPath) {
         Write-Error 'Cannot self-elevate: no PowerShell executable could be resolved to relaunch.'
-        exit 1
+        exit 64
     }
 
     # Re-launch via -Command, not -File. -File coerces every argument to a string,
@@ -142,7 +283,7 @@ if (-not $isAdmin -and -not $SkipElevation) {
     # Building a "& 'script' -Param:$bool" command preserves real PowerShell literals.
     $escPath = "'" + ($PSCommandPath -replace "'", "''") + "'"
     $invoke  = "& $escPath"
-    $PSBoundParameters.GetEnumerator() | ForEach-Object {
+    $BoundParameters.GetEnumerator() | ForEach-Object {
         $key = $_.Key
         $val = $_.Value
         if ($val -is [switch]) {
@@ -167,69 +308,50 @@ if (-not $isAdmin -and -not $SkipElevation) {
         # an unhandled exception and no explanation.
         Write-Warning "Elevation was declined or failed: $($_.Exception.Message)"
         Write-Warning 'Re-run with -SkipElevation to proceed without admin (admin-only steps will be flagged).'
-        exit 1
+        exit 64
     }
 }
 
-# TLS: no hardcoded override. Modern Windows/PowerShell negotiates TLS 1.2/1.3 automatically.
+function Initialize-ConsoleEncoding {
+    # Native CLIs emit UTF-8 (winget) or UTF-16LE (wsl); without this the console
+    # codepage turns their output into mojibake in the logs. Returns the previous
+    # encoding so the caller can put the host back the way it found it.
+    [CmdletBinding()]
+    param()
 
-# Native CLIs emit UTF-8 (winget) or UTF-16LE (wsl); without these the console
-# codepage turns their output into mojibake in the logs. Restored at the end so a
-# dot-sourced run does not leave the host altered.
-$originalOutputEncoding = [Console]::OutputEncoding
-try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
-$env:WSL_UTF8 = '1'
+    $previous = [Console]::OutputEncoding
+    try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false) } catch { }
+    $env:WSL_UTF8 = '1'
+    $previous
+}
 
-# ---------------------------------------------------------------------------
-# 1. Logging + step runner
-# ---------------------------------------------------------------------------
-# USERPROFILE is not guaranteed (SYSTEM contexts, stripped environments), so fall
-# back rather than building a path from $null.
-$logRoot = @($env:USERPROFILE, $env:LOCALAPPDATA, $env:TEMP, $PSScriptRoot) |
-    Where-Object { $_ } | Select-Object -First 1
-if (-not $logRoot) { $logRoot = [System.IO.Path]::GetTempPath() }
-$logDir = Join-Path $logRoot 'UpdateLogs'
+function Get-UpdateLogDirectory {
+    # Resolves a writable directory for this run's logs, creating it if needed.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        # Preferred roots, most specific first. USERPROFILE is not guaranteed
+        # (SYSTEM contexts, stripped environments), so the list is filtered for
+        # non-empty entries rather than used to build a path from $null.
+        [string[]] $Candidate = @($env:USERPROFILE, $env:LOCALAPPDATA, $env:TEMP, $PSScriptRoot)
+    )
 
-try {
-    if (-not (Test-Path -LiteralPath $logDir)) {
-        $null = New-Item -ItemType Directory -Path $logDir -Force -ErrorAction Stop
+    $logRoot = $Candidate | Where-Object { $_ } | Select-Object -First 1
+    if (-not $logRoot) { $logRoot = [System.IO.Path]::GetTempPath() }
+    $logDir = Join-Path $logRoot 'UpdateLogs'
+
+    try {
+        if (-not (Test-Path -LiteralPath $logDir)) {
+            $null = New-Item -ItemType Directory -Path $logDir -Force -ErrorAction Stop
+        }
+    } catch {
+        $logDir = Join-Path ([System.IO.Path]::GetTempPath()) 'UpdateLogs'
+        Write-Warning "Could not use the preferred log directory ($($_.Exception.Message)); falling back to $logDir."
+        $null = New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue
     }
-} catch {
-    $logDir = Join-Path ([System.IO.Path]::GetTempPath()) 'UpdateLogs'
-    Write-Warning "Could not use the preferred log directory ($($_.Exception.Message)); falling back to $logDir."
-    $null = New-Item -ItemType Directory -Path $logDir -Force -ErrorAction SilentlyContinue
+
+    $logDir
 }
-
-# One stamp shared by the transcript and every step log, so a single run's files
-# sort together and can be pruned as a unit.
-$runStamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
-$mainLog  = Join-Path $logDir "Update-Everything-$runStamp.log"
-
-# Step logs used to be a fixed name appended to forever. They now rotate per run,
-# so prune the old ones (and stale Terminal settings backups) instead.
-if ($LogRetentionDays -gt 0) {
-    $cutoff = (Get-Date).AddDays(-$LogRetentionDays)
-    Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue |
-        Where-Object { ($_.Name -like '*.log' -or $_.Name -like '*.json.bak') -and $_.LastWriteTime -lt $cutoff } |
-        Remove-Item -Force -ErrorAction SilentlyContinue
-}
-
-# A transcript is a nice-to-have, not a prerequisite: it fails if one is already
-# running or the path is not writable, and that must not kill the run.
-$transcriptRunning = $false
-try {
-    Start-Transcript -Path $mainLog -Append -ErrorAction Stop | Out-Null
-    $transcriptRunning = $true
-} catch {
-    Write-Warning "Transcript unavailable ($($_.Exception.Message)); per-step logs are unaffected."
-}
-
-$Results = [System.Collections.Generic.List[object]]::new()
-
-# winget exit codes that mean "nothing to do" rather than "failed".
-#   0x8A15002B (-1978335189) APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
-#   0x8A150014 (-1978335212) APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
-$WingetNothingToDo = @(-1978335189, -1978335212)
 
 function Write-StepLog {
     # Logging must never be the thing that kills a run, so failures here degrade
@@ -259,6 +381,10 @@ function Invoke-Step {
         [Parameter(Mandatory)][string]      $Name,
         [Parameter(Mandatory)][scriptblock] $Action,
         [string]                            $RequiresCommand,
+        # Steps that cannot work without administrator rights. Reported as
+        # skipped with the reason rather than left to fail with a permissions
+        # error that reads like a bug.
+        [switch]                            $RequiresAdmin,
         # Native exit codes this step should treat as success.
         [int[]]                             $AllowedExitCodes = @()
     )
@@ -269,6 +395,15 @@ function Invoke-Step {
     $safeName = ($Name -replace '[^\w\-]+', '-').Trim('-')
     if (-not $safeName) { $safeName = 'step' }
     $stepLog = Join-Path $script:logDir "$safeName-$script:runStamp.log"
+
+    # Pre-check administrator rights
+    if ($RequiresAdmin -and -not $script:isAdmin) {
+        $msg = "SKIP  $Name (requires Administrator; this run is not elevated)"
+        Write-Host $msg -ForegroundColor DarkGray
+        Write-StepLog -Path $stepLog -Message $msg
+        $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = 0; Log = '' })
+        return
+    }
 
     # Pre-check command availability
     if ($RequiresCommand -and -not (Get-Command $RequiresCommand -ErrorAction SilentlyContinue)) {
@@ -456,6 +591,129 @@ function Set-PwshAsWindowsTerminalDefault {
     Write-Host "Set Windows Terminal default profile to PowerShell 7 ($ps7Guid). Restart Windows Terminal to apply."
 }
 
+
+function Test-PendingReboot {
+    # Reports whether Windows is waiting on a restart, and why. Every probe is a
+    # Test-Path or Get-ItemProperty call, so a test can mock the registry instead
+    # of needing a machine that genuinely owes a reboot.
+    [CmdletBinding()]
+    param()
+
+    $pendingReboot  = $false
+    $rebootReasons  = [System.Collections.Generic.List[string]]::new()
+
+$pendingReboot  = $false
+$rebootReasons  = [System.Collections.Generic.List[string]]::new()
+
+$rebootKeys = [ordered]@{
+    'Component Based Servicing'  = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
+    'CBS reboot in progress'     = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootInProgress'
+    'Windows Update'             = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
+    'Windows Update post-reboot' = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\PostRebootReporting'
+}
+foreach ($entry in $rebootKeys.GetEnumerator()) {
+    if (Test-Path -LiteralPath $entry.Value) {
+        $pendingReboot = $true
+        $rebootReasons.Add($entry.Key)
+    }
+}
+
+# PendingFileRenameOperations exists as an empty value on plenty of healthy
+# machines, so test the value rather than the presence of the property.
+try {
+    $sm = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
+        -Name PendingFileRenameOperations -ErrorAction Stop
+    $pendingRenames = @($sm.PendingFileRenameOperations | Where-Object { $_ })
+    if ($pendingRenames.Count -gt 0) {
+        $pendingReboot = $true
+        $rebootReasons.Add("Pending file renames ($($pendingRenames.Count))")
+    }
+} catch { }
+
+# A queued computer rename also needs a restart to take effect.
+try {
+    $activeName = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' -Name ComputerName -ErrorAction Stop).ComputerName
+    $targetName = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName'       -Name ComputerName -ErrorAction Stop).ComputerName
+    if ($activeName -ne $targetName) {
+        $pendingReboot = $true
+        $rebootReasons.Add("Computer rename pending ($activeName -> $targetName)")
+    }
+} catch { }
+
+    [pscustomobject]@{
+        IsPending = $pendingReboot
+        Reasons   = $rebootReasons.ToArray()
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Dot-source guard
+#
+# Definitions above, work below. Dot-sourcing stops here with the functions
+# loaded and nothing updated.
+# ---------------------------------------------------------------------------
+if ($MyInvocation.InvocationName -eq '.') { return }
+
+# ---------------------------------------------------------------------------
+# 0. Elevation
+# ---------------------------------------------------------------------------
+$isAdmin = Test-IsAdministrator
+if (-not $isAdmin -and -not $SkipElevation) {
+    # Ask whether elevation is possible before asking for it. Without this the
+    # script raises a UAC prompt a standard user can never satisfy, and reports
+    # the refusal as though the user had declined it.
+    $elevation = Test-ElevationCapability
+    if (-not $elevation.CanElevate) {
+        Write-Warning "Cannot run elevated: $($elevation.Reason)"
+        Write-Warning 'Nothing has been changed. Re-run with -SkipElevation to run the steps that do not need administrator rights.'
+        exit 64
+    }
+    Invoke-SelfElevation -BoundParameters $PSBoundParameters
+}
+
+if (-not $isAdmin) {
+    Write-Warning 'Running without administrator rights. Steps that require admin will be skipped and listed in the summary.'
+}
+
+# TLS: no hardcoded override. Modern Windows/PowerShell negotiates TLS 1.2/1.3 automatically.
+$originalOutputEncoding = Initialize-ConsoleEncoding
+
+# ---------------------------------------------------------------------------
+# 1. Logging
+# ---------------------------------------------------------------------------
+$logDir = Get-UpdateLogDirectory
+
+# One stamp shared by the transcript and every step log, so a single run's files
+# sort together and can be pruned as a unit.
+$runStamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+$mainLog  = Join-Path $logDir "Update-Everything-$runStamp.log"
+
+# Step logs used to be a fixed name appended to forever. They now rotate per run,
+# so prune the old ones (and stale Terminal settings backups) instead.
+if ($LogRetentionDays -gt 0) {
+    $cutoff = (Get-Date).AddDays(-$LogRetentionDays)
+    Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue |
+        Where-Object { ($_.Name -like '*.log' -or $_.Name -like '*.json.bak') -and $_.LastWriteTime -lt $cutoff } |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
+# A transcript is a nice-to-have, not a prerequisite: it fails if one is already
+# running or the path is not writable, and that must not kill the run.
+$transcriptRunning = $false
+try {
+    Start-Transcript -Path $mainLog -Append -ErrorAction Stop | Out-Null
+    $transcriptRunning = $true
+} catch {
+    Write-Warning "Transcript unavailable ($($_.Exception.Message)); per-step logs are unaffected."
+}
+
+$Results = [System.Collections.Generic.List[object]]::new()
+
+# winget exit codes that mean "nothing to do" rather than "failed".
+#   0x8A15002B (-1978335189) APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
+#   0x8A150014 (-1978335212) APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
+$WingetNothingToDo = @(-1978335189, -1978335212)
+
 Write-Host "Maintenance run started $(Get-Date)  |  Admin: $isAdmin  |  Main Log: $mainLog" -ForegroundColor Green
 
 # ---------------------------------------------------------------------------
@@ -501,7 +759,7 @@ Invoke-Step -Name 'winget (all sources)' -RequiresCommand 'winget' -Action {
 # 2b. PowerShell 7 (install if missing, else upgrade to the latest release)
 # ---------------------------------------------------------------------------
 if ($IncludePowerShell7) {
-    Invoke-Step -Name 'PowerShell 7 (latest)' -RequiresCommand 'winget' -Action {
+    Invoke-Step -Name 'PowerShell 7 (latest)' -RequiresCommand 'winget' -RequiresAdmin -Action {
         $id  = 'Microsoft.PowerShell'
         $exe = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
 
@@ -838,7 +1096,7 @@ Invoke-Step -Name 'WSL kernel' -RequiresCommand 'wsl' -Action {
 # ---------------------------------------------------------------------------
 # 9. Microsoft Defender signatures
 # ---------------------------------------------------------------------------
-Invoke-Step -Name 'Defender signatures' -RequiresCommand 'Update-MpSignature' -Action {
+Invoke-Step -Name 'Defender signatures' -RequiresCommand 'Update-MpSignature' -RequiresAdmin -Action {
     # The Defender cmdlets are present even on machines where a third-party AV has
     # taken over and the antimalware service is off. Probe before updating so that
     # a managed device does not report a failed step every run.
@@ -872,7 +1130,7 @@ if ($SetPwshTerminalDefault) {
 # 10. Windows Update (OS + drivers) via PSWindowsUpdate
 # ---------------------------------------------------------------------------
 if ($IncludeWindowsUpdate) {
-    Invoke-Step -Name 'Windows Update' -Action {
+    Invoke-Step -Name 'Windows Update' -RequiresAdmin -Action {
         if (-not $isAdmin) { throw 'Administrator rights required for Windows Update.' }
 
         if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
@@ -932,48 +1190,10 @@ if ($failedSteps.Count -or $warnedSteps.Count) {
     }
 }
 
-# Reboot detection
-$pendingReboot  = $false
-$rebootReasons  = [System.Collections.Generic.List[string]]::new()
-
-$rebootKeys = [ordered]@{
-    'Component Based Servicing'  = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending'
-    'CBS reboot in progress'     = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootInProgress'
-    'Windows Update'             = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired'
-    'Windows Update post-reboot' = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\PostRebootReporting'
-}
-foreach ($entry in $rebootKeys.GetEnumerator()) {
-    if (Test-Path -LiteralPath $entry.Value) {
-        $pendingReboot = $true
-        $rebootReasons.Add($entry.Key)
-    }
-}
-
-# PendingFileRenameOperations exists as an empty value on plenty of healthy
-# machines, so test the value rather than the presence of the property.
-try {
-    $sm = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
-        -Name PendingFileRenameOperations -ErrorAction Stop
-    $pendingRenames = @($sm.PendingFileRenameOperations | Where-Object { $_ })
-    if ($pendingRenames.Count -gt 0) {
-        $pendingReboot = $true
-        $rebootReasons.Add("Pending file renames ($($pendingRenames.Count))")
-    }
-} catch { }
-
-# A queued computer rename also needs a restart to take effect.
-try {
-    $activeName = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ActiveComputerName' -Name ComputerName -ErrorAction Stop).ComputerName
-    $targetName = (Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\ComputerName\ComputerName'       -Name ComputerName -ErrorAction Stop).ComputerName
-    if ($activeName -ne $targetName) {
-        $pendingReboot = $true
-        $rebootReasons.Add("Computer rename pending ($activeName -> $targetName)")
-    }
-} catch { }
-
-if ($pendingReboot) {
+$reboot = Test-PendingReboot
+if ($reboot.IsPending) {
     Write-Host "`n[!] A reboot is pending. Restart to finish applying updates." -ForegroundColor Yellow
-    foreach ($reason in $rebootReasons) { Write-Host "    - $reason" -ForegroundColor Yellow }
+    foreach ($reason in $reboot.Reasons) { Write-Host "    - $reason" -ForegroundColor Yellow }
 } else {
     Write-Host "`n[OK] No pending reboots detected." -ForegroundColor Green
 }
