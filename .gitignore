@@ -1,0 +1,22 @@
+# Run output
+UpdateLogs/
+*.log
+*.trx
+transcript*.txt
+
+# Local overrides / scratch
+*.local.ps1
+*.bak
+*.tmp
+scratch/
+out/
+
+# Editors / OS
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+Thumbs.db
+desktop.ini
+$RECYCLE.BIN/
