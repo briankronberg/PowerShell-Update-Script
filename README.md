@@ -30,7 +30,9 @@ itself elevated unless `-SkipElevation` is passed.
 | `-AutoReboot` | off | Let Windows Update reboot on its own. Off by default — the script reports a pending reboot instead. |
 | `-IncludePrerelease` | off | Include prerelease builds where supported (currently PowerShell module updates). |
 | `-UpdateGlobalNpm` | off | Upgrade global npm packages as well as npm itself. Off by default because global upgrades occasionally break pinned toolchains. |
-| `-SkipElevation` | off | Never relaunch elevated. Admin-only steps fail and are flagged in the summary. |
+| `-SkipElevation` | off | Never relaunch elevated. Steps that need admin are reported as skipped with that reason. |
+| `-Notify` | off | Show Windows toast notifications when the run finishes, plus an urgent one if a restart is needed. Meant for scheduled runs. |
+| `-InstallNotificationModule` | off | Install BurntToast from the PowerShell Gallery if `-Notify` is set and the module is missing. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
 
 ### Exit codes
@@ -111,15 +113,105 @@ when PowerShell itself raised an error record — that design note, and the rest
 the reasoning behind the script's shape, is in the comment-based help at the top
 of the file.
 
+## Notifications
+
+An interactive run prints everything to the console. A scheduled one has nobody
+watching, so `-Notify` raises Windows toast notifications instead:
+
+- **A summary** when the run finishes — how many steps updated, failed, warned
+  or were skipped, and where the logs are.
+- **A restart notice**, marked *urgent*, when Windows is waiting on a reboot.
+  Urgent notifications break through Focus Assist, which ordinary ones do not.
+  A machine that has installed updates but not restarted has not finished
+  updating, and that is worth interrupting for.
+
+Notifications need the [BurntToast](https://github.com/Windos/BurntToast) module:
+
+```powershell
+Install-Module BurntToast -Scope CurrentUser
+```
+
+It is an optional dependency, never a hard one. If the module is missing, or the
+run has no interactive desktop session to draw on, the script warns once and
+carries on. A notification failing must never be the reason a machine goes
+un-updated. Pass `-InstallNotificationModule` to have the script install it on
+first use.
+
+```powershell
+.\Update-Everything.ps1 -Notify
+```
+
+**Toasts need a desktop session.** They are drawn by the shell into an
+interactive session, so a task running as `SYSTEM` cannot show one — the run
+finishes silently and the restart notice never appears. This is why the
+scheduled task below runs as *you* rather than as `SYSTEM`.
+
+## Running on a schedule
+
+`Register-UpdateTask.ps1` creates a Windows scheduled task. It must be run from
+an **elevated** session, because the task itself runs with the highest
+privileges:
+
+```powershell
+.\Register-UpdateTask.ps1                     # weekly, Wednesday at noon
+.\Register-UpdateTask.ps1 -Cadence PatchTuesday
+.\Register-UpdateTask.ps1 -Cadence Weekly -DayOfWeek Saturday -At 09:00
+.\Register-UpdateTask.ps1 -Show               # what is registered right now
+.\Register-UpdateTask.ps1 -Unregister         # remove it
+```
+
+### Choosing a cadence
+
+| Cadence | Runs | When to pick it |
+|---|---|---|
+| `Weekly` *(default)* | Every week on `-DayOfWeek` (default Wednesday) | A personal machine. Picks up Patch Tuesday within a few days and keeps package managers current, without a heavy job every day. |
+| `PatchTuesday` | The third Wednesday of each month | You want to track Microsoft's cycle and install nothing else in between. |
+| `Daily` | Every day | Rarely worth it. A full pass across every package manager is heavy, and Windows already updates Defender signatures on its own several times a day. |
+
+**Why the third Wednesday, and not the second?** Microsoft ships on the second
+Tuesday of the month, around 17:00 UTC. The usual advice is to let a patch sit
+for a few days rather than installing it the hour it lands. The obvious way to
+express "the day after Patch Tuesday" is the second Wednesday — and that is
+wrong. In 12 of the 84 months from 2026 to 2032 the second Wednesday falls
+*before* Patch Tuesday, so the run would happen before the patches exist. The
+third Wednesday is always 1 to 8 days after it. There is a test that checks this
+for every month in that range.
+
+### Task settings, and why
+
+The task runs **as you, elevated, while you are logged on**. Running as `SYSTEM`
+would be simpler and would not need you logged in, but `SYSTEM` cannot show a
+notification to anybody, so the summary and the restart notice would go
+nowhere. Running as the user with `RunLevel Highest` gets both administrator
+rights and a session that toasts can reach.
+
+The cost is that the task only runs while you are logged on. `StartWhenAvailable`
+covers the usual laptop case: a run missed because the machine was asleep or
+switched off happens shortly after your next logon.
+
+| Setting | Value | Reason |
+|---|---|---|
+| `StartWhenAvailable` | on | Catches up a run missed while the laptop was off, instead of waiting a whole cycle. |
+| `RunOnlyIfNetworkAvailable` | on | Nothing to update without a network. |
+| Battery | won't start, stops if unplugged | A full update pass is heavy. Override with `-AllowBattery`. |
+| `RandomDelay` | 15 min | Spreads the start time. Set with `-RandomDelayMinutes`. |
+| `ExecutionTimeLimit` | 2 hours | One wedged installer would otherwise hold the task open until the next reboot. |
+| `MultipleInstances` | `IgnoreNew` | A second run would fight the first for the same package managers and log files. |
+| `RestartCount` / `RestartInterval` | 2 / 30 min | Transient network failures are the common case. |
+| `WakeToRun` | off | Don't wake a sleeping laptop; `StartWhenAvailable` picks it up later anyway. |
+
 ## Repository layout
 
 ```
 Update-Everything.ps1                          the script
+Register-UpdateTask.ps1                        registers it as a scheduled task
 test.ps1                                       test runner, used locally and by CI
 PSScriptAnalyzerSettings.psd1                  lint rules (5.1 + 7.0 compatibility)
 tests/Update-Everything.Tests.ps1              static contract: parameters, help, docs, guard
 tests/Update-Everything.Functions.Tests.ps1    behaviour: logging, steps, reboot, elevation
 tests/Set-PwshAsWindowsTerminalDefault.Tests.ps1   the settings.json rewrite, in a sandbox
+tests/Register-UpdateTask.Tests.ps1            cadences, triggers and task settings
+tests/Notification.Tests.ps1                   toast behaviour, with BurntToast stubbed
 .github/workflows/ci.yml                       runs test.ps1 on windows-latest
 ```
 

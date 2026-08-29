@@ -83,6 +83,21 @@
     reported as skipped with that reason rather than failing on a permissions
     error. Useful for unattended/standard-user runs.
 
+.PARAMETER Notify
+    Show Windows toast notifications when the run finishes: a summary, and a
+    separate urgent notification when a restart is required. Off by default,
+    because an interactive run already prints everything to the console. Meant
+    for scheduled runs, where the summary would otherwise go unseen.
+
+    Requires the BurntToast module (https://github.com/Windos/BurntToast) and an
+    interactive desktop session. Missing module or non-interactive session
+    degrades to no notifications; it never fails the run.
+
+.PARAMETER InstallNotificationModule
+    Install BurntToast from the PowerShell Gallery (CurrentUser scope) if -Notify
+    is set and the module is missing. Default: $false, so an unattended run does
+    not quietly pull a module down.
+
 .PARAMETER LogRetentionDays
     Delete logs and settings.json backups in the log directory older than this
     many days. Default: 30. Set to 0 to keep everything.
@@ -117,6 +132,8 @@ param(
     [switch] $IncludePrerelease,
     [switch] $UpdateGlobalNpm,
     [switch] $SkipElevation,
+    [switch] $Notify,
+    [switch] $InstallNotificationModule,
     [ValidateRange(0, 3650)]
     [int]    $LogRetentionDays       = 30
 )
@@ -351,6 +368,117 @@ function Get-UpdateLogDirectory {
     }
 
     $logDir
+}
+
+function Test-InteractiveSession {
+    # Wrapped rather than called inline so the notification path can be tested
+    # without a desktop session to run in.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    [Environment]::UserInteractive
+}
+
+function Test-BurntToastSupportsUrgent {
+    # -Urgent arrived in BurntToast 1.0. On an older module the parameter does
+    # not exist and passing it would fail the whole call, losing the notification
+    # rather than merely its urgency.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    try {
+        return (Get-Command New-BurntToastNotification -ErrorAction Stop).Parameters.ContainsKey('Urgent')
+    } catch {
+        return $false
+    }
+}
+
+function Initialize-NotificationSupport {
+    # Prepares toast notifications, and reports whether they are usable. Toasts
+    # are a convenience: every failure path here returns $false rather than
+    # throwing, because a missing notification module must never be the reason a
+    # maintenance run does not happen.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        # Pull BurntToast from the PowerShell Gallery when it is missing.
+        [switch] $InstallIfMissing
+    )
+
+    # A toast is drawn by the shell in an interactive desktop session. From a
+    # service or a SYSTEM-run scheduled task there is no session to draw into,
+    # and the call either fails or posts a notification nobody can see.
+    if (-not (Test-InteractiveSession)) {
+        Write-Warning 'Notifications requested, but this is not an interactive session; toasts cannot be shown. Schedule the task to run as your own user while logged on.'
+        return $false
+    }
+
+    if (-not (Get-Module BurntToast -ListAvailable)) {
+        if (-not $InstallIfMissing) {
+            Write-Warning 'Notifications requested, but the BurntToast module is not installed. Install it with "Install-Module BurntToast -Scope CurrentUser", or pass -InstallNotificationModule.'
+            return $false
+        }
+        try {
+            Write-Host 'Installing BurntToast (CurrentUser) for notifications...'
+            Install-Module -Name BurntToast -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+        } catch {
+            Write-Warning "Could not install BurntToast: $($_.Exception.Message). Continuing without notifications."
+            return $false
+        }
+    }
+
+    try {
+        Import-Module BurntToast -ErrorAction Stop
+        return $true
+    } catch {
+        Write-Warning "Could not load BurntToast: $($_.Exception.Message). Continuing without notifications."
+        return $false
+    }
+}
+
+function Send-UpdateNotification {
+    # Posts one toast. Silent no-op when notifications are unavailable, and it
+    # swallows its own failures for the same reason as above.
+    [CmdletBinding()]
+    param(
+        # Up to three lines: BurntToast renders the first as the title.
+        [Parameter(Mandatory)]
+        [string[]] $Text,
+
+        # Marks the toast an "Important Notification", which breaks through
+        # Focus Assist / Do Not Disturb. Reserved for the restart notice: a
+        # machine left un-rebooted has not finished applying its updates.
+        [switch] $Urgent,
+
+        # Toasts sharing an identifier replace one another rather than stacking,
+        # so a weekly task does not leave a column of stale summaries.
+        [string] $UniqueIdentifier = 'Update-Everything'
+    )
+
+    if (-not $script:NotificationsAvailable) { return }
+
+    try {
+        $toast = @{
+            Text             = $Text
+            UniqueIdentifier = $UniqueIdentifier
+        }
+
+        # -Urgent arrived in BurntToast 1.0. Older versions would fail the whole
+        # call on an unknown parameter, so ask before using it.
+        if ($Urgent) {
+            if (Test-BurntToastSupportsUrgent) {
+                $toast['Urgent'] = $true
+            } else {
+                Write-Warning 'This version of BurntToast has no -Urgent switch; sending an ordinary notification instead.'
+            }
+        }
+
+        New-BurntToastNotification @toast -ErrorAction Stop
+    } catch {
+        Write-Warning "Could not show notification: $($_.Exception.Message)"
+    }
 }
 
 function Write-StepLog {
@@ -1196,6 +1324,31 @@ if ($reboot.IsPending) {
     foreach ($reason in $reboot.Reasons) { Write-Host "    - $reason" -ForegroundColor Yellow }
 } else {
     Write-Host "`n[OK] No pending reboots detected." -ForegroundColor Green
+}
+
+if ($Notify) {
+    $script:NotificationsAvailable = Initialize-NotificationSupport -InstallIfMissing:$InstallNotificationModule
+
+    $okCount      = @($Results | Where-Object { $_.Status -eq 'OK' }).Count
+    $skippedCount = @($Results | Where-Object { $_.Status -eq 'Skipped' }).Count
+    $headline     = if ($failedSteps.Count) { "Updates finished with $($failedSteps.Count) failure(s)" } else { 'Updates finished' }
+
+    Send-UpdateNotification -Text @(
+        $headline
+        "$okCount updated, $($failedSteps.Count) failed, $($warnedSteps.Count) with warnings, $skippedCount skipped."
+        "Logs: $logDir"
+    )
+
+    # Sent second and separately so it is the one left on screen, and marked
+    # urgent so Focus Assist does not hide the fact that the machine is only
+    # half-updated until it restarts.
+    if ($reboot.IsPending) {
+        Send-UpdateNotification -Urgent -UniqueIdentifier 'Update-Everything-Reboot' -Text @(
+            'Restart required'
+            'Windows needs a restart to finish applying updates.'
+            (($reboot.Reasons | Select-Object -First 2) -join '; ')
+        )
+    }
 }
 
 Write-Host "Finished $(Get-Date). Detailed logs saved to: $logDir" -ForegroundColor Green

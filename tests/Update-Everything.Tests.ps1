@@ -28,12 +28,19 @@ BeforeDiscovery {
         @{ Name = 'IncludePrerelease';      TypeName = 'switch'; Type = [switch]; Default = $null }
         @{ Name = 'UpdateGlobalNpm';        TypeName = 'switch'; Type = [switch]; Default = $null }
         @{ Name = 'SkipElevation';          TypeName = 'switch'; Type = [switch]; Default = $null }
+        @{ Name = 'Notify';                 TypeName = 'switch'; Type = [switch]; Default = $null }
+        @{ Name = 'InstallNotificationModule'; TypeName = 'switch'; Type = [switch]; Default = $null }
         @{ Name = 'LogRetentionDays';       TypeName = 'int';    Type = [int];    Default = '30' }
     )
 
     # Switches that must stay off by default: each one either reboots the machine
     # or moves pinned toolchains, so turning one on has to be a deliberate act.
-    $DefaultOffSwitches = @('AutoReboot', 'IncludePrerelease', 'UpdateGlobalNpm', 'SkipElevation')
+    $DefaultOffSwitches = @(
+        'AutoReboot', 'IncludePrerelease', 'UpdateGlobalNpm', 'SkipElevation',
+        # Notifications are opt-in, and pulling a module off the gallery
+        # unasked would be a surprise in an unattended run.
+        'Notify', 'InstallNotificationModule'
+    )
 
     # Steps that cannot possibly work unelevated. Each must carry -RequiresAdmin
     # so an unelevated run reports "skipped, needs admin" instead of a
@@ -45,10 +52,13 @@ BeforeDiscovery {
     # Every PowerShell file in the repo gets linted, not just the script.
     $LintTargets = @(
         'Update-Everything.ps1'
+        'Register-UpdateTask.ps1'
         'test.ps1'
         'tests/Update-Everything.Tests.ps1'
         'tests/Update-Everything.Functions.Tests.ps1'
         'tests/Set-PwshAsWindowsTerminalDefault.Tests.ps1'
+        'tests/Register-UpdateTask.Tests.ps1'
+        'tests/Notification.Tests.ps1'
     )
 }
 
@@ -169,7 +179,7 @@ Describe 'Update-Everything.ps1' -Tag 'Static' {
 
         It 'declares no parameters beyond the documented contract' {
             $declared = $script:DeclaredParameters.Name.VariablePath.UserPath
-            $declared | Should-BeCollection -Count 8 -Because 'a new parameter needs docs and a test'
+            $declared | Should-BeCollection -Count 10 -Because 'a new parameter needs docs and a test'
         }
 
         It 'bounds -LogRetentionDays with ValidateRange' {
