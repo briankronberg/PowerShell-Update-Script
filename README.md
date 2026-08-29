@@ -60,7 +60,7 @@ installed, substitute `powershell` in any command below.
 | `-UpdateGlobalNpm` | off | Upgrade global npm packages as well as npm itself. Off by default because global upgrades occasionally break pinned toolchains. |
 | `-SkipElevation` | off | Never relaunch elevated. Steps that need admin are reported as skipped with that reason. |
 | `-Notify` | off | Show Windows toast notifications when the run finishes, plus an urgent one if a restart is needed. Meant for scheduled runs. |
-| `-InstallNotificationModule` | off | Install BurntToast from the PowerShell Gallery if `-Notify` is set and the module is missing. |
+| `-AllowInstall` | *(none)* | Which missing components may be **installed** this run: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`. See below. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
 
 ### Exit codes
@@ -131,6 +131,51 @@ when PowerShell itself raised an error record — that design note, and the rest
 the reasoning behind the script's shape, is in the comment-based help at the top
 of the file.
 
+## Installing versus updating
+
+This is an update script, not an installer. Updating something already on the
+machine is the job and needs no permission. Installing something that was never
+there is a different act, and the script will not do it behind your back.
+
+Four things can require a first-time install:
+
+| Component | What it installs | Scope | Needed for |
+|---|---|---|---|
+| `PowerShell7` | PowerShell 7, via winget (MSI) | machine-wide | `-IncludePowerShell7` |
+| `PSWindowsUpdate` | The PSWindowsUpdate module | **all users** | `-IncludeWindowsUpdate` |
+| `NuGetProvider` | The NuGet package provider | current user | reaching the PowerShell Gallery |
+| `BurntToast` | The BurntToast module | current user | `-Notify` |
+
+With no `-AllowInstall`, an **interactive** run asks before each one, defaulting
+to *No* — so pressing Enter through an unexpected prompt does not install
+anything:
+
+```
+Install PSWindowsUpdate?
+The PSWindowsUpdate module is not installed. Windows Update cannot be driven
+without it. This would install it from the PowerShell Gallery for all users on
+this machine.
+
+This is a first-time install, not an update.
+[Y] Yes  [N] No  (default is "N"):
+```
+
+A **non-interactive** run — a scheduled task — never prompts and never installs.
+There is nobody to ask, so it declines and reports the step as skipped. Approve
+in advance instead:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -AllowInstall PSWindowsUpdate,BurntToast
+```
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -AllowInstall All
+```
+
+Each component is asked about at most once per run, and a declined install
+**skips its step rather than failing it** — a decision is not a fault, so it
+stays out of the exit code. Everything else in the run carries on unaffected.
+
 ## Notifications
 
 An interactive run prints everything to the console. A scheduled one has nobody
@@ -176,10 +221,10 @@ whether a toast is attempted at all. `Send-UpdateNotification` checks it and
 returns silently, so no send is ever tried against a module that is not there —
 and nothing repeats the warning per notification, since you were already told.
 
-Pass `-InstallNotificationModule` to have the script install BurntToast on first
-use. That install now happens up front too, so a run that was asked to notify can
-actually do so, rather than installing the module after the work it was meant to
-report on.
+Pass `-AllowInstall BurntToast` to let the script install it on first use, under
+the same consent rules as everything else above. That install happens up front,
+so a run asked to notify can actually do so, rather than installing the module
+after the work it was meant to report on.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -Notify

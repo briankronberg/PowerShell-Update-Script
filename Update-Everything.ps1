@@ -83,6 +83,26 @@
     reported as skipped with that reason rather than failing on a permissions
     error. Useful for unattended/standard-user runs.
 
+.PARAMETER AllowInstall
+    Which missing components this run may install for the first time. Updating
+    something already present never needs approval; installing something new
+    always does.
+
+    This is an update script, not an installer. Left unset, nothing new is
+    installed: an interactive run asks before each one, and a non-interactive
+    run (a scheduled task) declines and reports the step as skipped, because
+    there is nobody there to ask.
+
+    Accepts any of:
+      All              approve everything below
+      PowerShell7      install PowerShell 7 via winget (machine-wide MSI)
+      PSWindowsUpdate  install the PSWindowsUpdate module (AllUsers scope)
+      NuGetProvider    install the NuGet package provider (CurrentUser)
+      BurntToast       install the BurntToast module for -Notify (CurrentUser)
+
+    A scheduled task cannot prompt, so pass the approvals it should have:
+        -AllowInstall PSWindowsUpdate,BurntToast
+
 .PARAMETER Notify
     Show Windows toast notifications when the run finishes: a summary, and a
     separate urgent notification when a restart is required. Off by default,
@@ -97,11 +117,6 @@
     warning lands at the top of the transcript rather than after a long run.
     The reason is repeated in the closing summary, because by then the original
     warning has scrolled well out of sight.
-
-.PARAMETER InstallNotificationModule
-    Install BurntToast from the PowerShell Gallery (CurrentUser scope) if -Notify
-    is set and the module is missing. Default: $false, so an unattended run does
-    not quietly pull a module down.
 
 .PARAMETER LogRetentionDays
     Delete logs and settings.json backups in the log directory older than this
@@ -138,7 +153,8 @@ param(
     [switch] $UpdateGlobalNpm,
     [switch] $SkipElevation,
     [switch] $Notify,
-    [switch] $InstallNotificationModule,
+    [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast')]
+    [string[]] $AllowInstall = @(),
     [ValidateRange(0, 3650)]
     [int]    $LogRetentionDays       = 30
 )
@@ -400,6 +416,106 @@ function Test-BurntToastSupportsUrgent {
     }
 }
 
+function Test-CanPrompt {
+    # Whether this session can actually ask a question and get an answer.
+    #
+    # UserInteractive alone is not enough, and believing it causes a hang:
+    # a run whose stdin is a pipe or a file reports UserInteractive $true, but
+    # PromptForChoice then blocks forever waiting on input that never arrives.
+    # Piping the script through tee, or running it from a build agent, is enough
+    # to hit this. Both conditions have to hold.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param()
+
+    [Environment]::UserInteractive -and -not [Console]::IsInputRedirected
+}
+
+function Request-InstallConsent {
+    # Asks the operator, once, whether a component may be installed. Split out so
+    # the decision logic around it can be tested without a console to type into.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string] $Component,
+        [Parameter(Mandatory)][string] $Description
+    )
+
+    $choices = [System.Management.Automation.Host.ChoiceDescription[]] @(
+        [System.Management.Automation.Host.ChoiceDescription]::new('&Yes', "Install $Component now.")
+        [System.Management.Automation.Host.ChoiceDescription]::new('&No', "Skip the step that needs $Component.")
+    )
+
+    try {
+        # Default is No. Someone hitting Enter to get through a prompt they did
+        # not expect should not thereby install software.
+        $answer = $Host.UI.PromptForChoice(
+            # Braces required: "$Component?" parses the ? as part of the
+            # variable name, so the caption would read "Install " with no name.
+            "Install ${Component}?",
+            "$Description`n`nThis is a first-time install, not an update.",
+            $choices,
+            1)
+        return ($answer -eq 0)
+    } catch {
+        # A host with no interactive UI (-NonInteractive, a service) throws here
+        # rather than returning a default.
+        Write-Warning "Could not prompt for consent to install $Component ($($_.Exception.Message)); treating it as declined."
+        return $false
+    }
+}
+
+function Approve-Install {
+    # Decides whether a first-time install may proceed. Approval comes from
+    # -AllowInstall, or from asking; the answer is remembered for the rest of the
+    # run so a component is never asked about twice.
+    [CmdletBinding()]
+    [OutputType([bool])]
+    param(
+        [Parameter(Mandatory)][string] $Component,
+        [Parameter(Mandatory)][string] $Description,
+
+        # The caller's -AllowInstall list.
+        [string[]] $Approved = @()
+    )
+
+    if ($Approved -contains 'All' -or $Approved -contains $Component) {
+        return $true
+    }
+
+    if ($null -eq $script:InstallDecision) { $script:InstallDecision = @{} }
+    if ($script:InstallDecision.ContainsKey($Component)) {
+        return $script:InstallDecision[$Component]
+    }
+
+    if (-not (Test-CanPrompt)) {
+        # A scheduled run has nobody to ask, and silently installing software on
+        # a machine nobody is watching is exactly what this gate exists to stop.
+        Write-Warning "$Component is not installed, and this run cannot prompt for consent. Re-run with -AllowInstall $Component (or -AllowInstall All) to permit it."
+        $script:InstallDecision[$Component] = $false
+        return $false
+    }
+
+    $granted = Request-InstallConsent -Component $Component -Description $Description
+    $script:InstallDecision[$Component] = $granted
+
+    if (-not $granted) {
+        Write-Warning "Declined to install $Component. The step that needs it will be skipped."
+    }
+
+    return $granted
+}
+
+function Stop-StepAsSkipped {
+    # Ends the current step as 'Skipped' rather than 'Failed'. Declining an
+    # install is a decision, not a fault, and the summary should not colour it
+    # like one. Invoke-Step recognises this sentinel prefix.
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $Reason)
+
+    throw "STEP-SKIPPED: $Reason"
+}
+
 function Initialize-NotificationSupport {
     # Prepares toast notifications, and reports whether they are usable and why
     # not. Toasts are a convenience: every failure path here reports rather than
@@ -412,8 +528,9 @@ function Initialize-NotificationSupport {
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
-        # Pull BurntToast from the PowerShell Gallery when it is missing.
-        [switch] $InstallIfMissing
+        # The caller's -AllowInstall list, consulted before BurntToast is pulled
+        # from the PowerShell Gallery.
+        [string[]] $Approved = @()
     )
 
     # A toast is drawn by the shell in an interactive desktop session. From a
@@ -426,9 +543,9 @@ function Initialize-NotificationSupport {
     }
 
     if (-not (Get-Module BurntToast -ListAvailable)) {
-        if (-not $InstallIfMissing) {
-            $reason = 'the BurntToast module is not installed. Install it with "Install-Module BurntToast -Scope CurrentUser", or re-run with -InstallNotificationModule.'
-            Write-Warning "Notifications requested, but $reason"
+        if (-not (Approve-Install -Component 'BurntToast' -Approved $Approved `
+                -Description 'Notifications were requested with -Notify, but the BurntToast module is not installed. This would install it from the PowerShell Gallery for the current user only.')) {
+            $reason = 'the BurntToast module is not installed, and installing it was not approved. Install it with "Install-Module BurntToast -Scope CurrentUser", or re-run with -AllowInstall BurntToast.'
             return [pscustomobject]@{ Available = $false; Reason = $reason }
         }
         try {
@@ -607,6 +724,19 @@ function Invoke-Step {
     } catch {
         $sw.Stop()
         $secs = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+
+        # Stop-StepAsSkipped throws this prefix to end a step deliberately --
+        # a declined install, for instance. That is a decision, not a fault, and
+        # reporting it as Failed would put it in the exit code.
+        $message = "$_"
+        if ($message -like 'STEP-SKIPPED:*') {
+            $reason = $message -replace '^STEP-SKIPPED:\s*', ''
+            Write-Host "SKIP  $Name ($reason)" -ForegroundColor DarkGray
+            Write-StepLog -Path $stepLog -Message "SKIPPED | $reason"
+            $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = $secs; Log = '' })
+            return
+        }
+
         Write-Warning ("FAILED: $Name | $_")
         Write-StepLog -Path $stepLog -Message "FAILED | $_"
         $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Failed'; Seconds = $secs; Log = $stepLog })
@@ -856,10 +986,14 @@ try {
 # transcript, where someone looking for "why did I not get a toast" will find it.
 # It also means -InstallNotificationModule installs before the run rather than
 # after everything it was meant to report on.
+# Answers to install prompts, remembered for the run so a component is asked
+# about at most once.
+$script:InstallDecision = @{}
+
 $script:NotificationsAvailable = $false
 $notificationStatus = $null
 if ($Notify) {
-    $notificationStatus = Initialize-NotificationSupport -InstallIfMissing:$InstallNotificationModule
+    $notificationStatus = Initialize-NotificationSupport -Approved $AllowInstall
     $script:NotificationsAvailable = $notificationStatus.Available
 }
 
@@ -933,6 +1067,11 @@ if ($IncludePowerShell7) {
         }
 
         if (-not $isInstalled) {
+            if (-not (Approve-Install -Component 'PowerShell7' -Approved $AllowInstall `
+                    -Description 'PowerShell 7 is not installed. This would install it machine-wide via winget (MSI package, into C:\Program Files\PowerShell\7).')) {
+                Stop-StepAsSkipped -Reason 'installing PowerShell 7 was not approved'
+            }
+
             Write-Host 'PowerShell 7 not detected; installing the MSI package via winget...'
             # --installer-type wix forces the MSI (winget 7.6+ defaults to MSIX) so it
             # installs to C:\Program Files\PowerShell\7 where Terminal expects it.
@@ -1001,6 +1140,11 @@ Invoke-Step -Name 'Microsoft 365 Apps' -Action {
 Invoke-Step -Name 'Trust PSGallery' -Action {
     # PowerShellGet v2 pulls the NuGet provider on first use and prompts for it.
     if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
+        if (-not (Approve-Install -Component 'NuGetProvider' -Approved $AllowInstall `
+                -Description 'The NuGet package provider is missing. PowerShellGet needs it to reach the PowerShell Gallery. This would install it for the current user only.')) {
+            Stop-StepAsSkipped -Reason 'installing the NuGet provider was not approved'
+        }
+
         Write-Output 'Bootstrapping NuGet package provider...'
         $null = Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
             -Force -Scope CurrentUser -ErrorAction Stop
@@ -1290,6 +1434,11 @@ if ($IncludeWindowsUpdate) {
         if (-not $isAdmin) { throw 'Administrator rights required for Windows Update.' }
 
         if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {
+            if (-not (Approve-Install -Component 'PSWindowsUpdate' -Approved $AllowInstall `
+                    -Description 'The PSWindowsUpdate module is not installed. Windows Update cannot be driven without it. This would install it from the PowerShell Gallery for all users on this machine.')) {
+                Stop-StepAsSkipped -Reason 'installing PSWindowsUpdate was not approved'
+            }
+
             try {
                 Install-Module PSWindowsUpdate -Force -Scope AllUsers -AcceptLicense `
                     -AllowClobber -Confirm:$false -ErrorAction Stop

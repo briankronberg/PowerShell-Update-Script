@@ -29,7 +29,7 @@ BeforeDiscovery {
         @{ Name = 'UpdateGlobalNpm';        TypeName = 'switch'; Type = [switch]; Default = $null }
         @{ Name = 'SkipElevation';          TypeName = 'switch'; Type = [switch]; Default = $null }
         @{ Name = 'Notify';                 TypeName = 'switch'; Type = [switch]; Default = $null }
-        @{ Name = 'InstallNotificationModule'; TypeName = 'switch'; Type = [switch]; Default = $null }
+        @{ Name = 'AllowInstall';           TypeName = 'string[]'; Type = [string[]]; Default = '@()' }
         @{ Name = 'LogRetentionDays';       TypeName = 'int';    Type = [int];    Default = '30' }
     )
 
@@ -39,7 +39,7 @@ BeforeDiscovery {
         'AutoReboot', 'IncludePrerelease', 'UpdateGlobalNpm', 'SkipElevation',
         # Notifications are opt-in, and pulling a module off the gallery
         # unasked would be a surprise in an unattended run.
-        'Notify', 'InstallNotificationModule'
+        'Notify'
     )
 
     # Steps that cannot possibly work unelevated. Each must carry -RequiresAdmin
@@ -59,6 +59,7 @@ BeforeDiscovery {
         'tests/Set-PwshAsWindowsTerminalDefault.Tests.ps1'
         'tests/Register-UpdateTask.Tests.ps1'
         'tests/Notification.Tests.ps1'
+        'tests/InstallConsent.Tests.ps1'
     )
 }
 

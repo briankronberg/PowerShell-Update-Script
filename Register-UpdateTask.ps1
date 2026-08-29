@@ -63,6 +63,12 @@
     Pass -Notify to the script so it raises toast notifications. Default: $true,
     since an unattended run is exactly the case notifications exist for.
 
+.PARAMETER AllowInstall
+    Approvals to pass through to Update-Everything.ps1 for first-time installs.
+    A scheduled run cannot prompt, so anything not approved here is declined and
+    its step reported as skipped. Accepts All, PowerShell7, PSWindowsUpdate,
+    NuGetProvider, BurntToast.
+
 .PARAMETER ExtraArgument
     Additional arguments for Update-Everything.ps1, for example
     -ExtraArgument '-IncludeWindowsUpdate','$false'.
@@ -134,6 +140,9 @@ param(
     [string] $ScriptPath,
 
     [bool] $Notify = $true,
+
+    [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast')]
+    [string[]] $AllowInstall = @(),
 
     [string[]] $ExtraArgument = @(),
 
@@ -326,11 +335,14 @@ function Get-UpdateTaskArgument {
     param(
         [Parameter(Mandatory)][string] $ScriptPath,
         [bool] $Notify = $true,
+        [string[]] $AllowInstall = @(),
         [string[]] $ExtraArgument = @()
     )
 
     $parts = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ScriptPath))
     if ($Notify) { $parts += '-Notify' }
+    # A scheduled run cannot answer a prompt, so approvals have to travel with it.
+    if ($AllowInstall) { $parts += @('-AllowInstall', ($AllowInstall -join ',')) }
     if ($ExtraArgument) { $parts += $ExtraArgument }
 
     $parts -join ' '
@@ -450,7 +462,8 @@ if ($existing -and -not $Force) {
 
 $action = New-ScheduledTaskAction `
     -Execute (Get-PowerShellHostPath) `
-    -Argument (Get-UpdateTaskArgument -ScriptPath $ScriptPath -Notify $Notify -ExtraArgument $ExtraArgument) `
+    -Argument (Get-UpdateTaskArgument -ScriptPath $ScriptPath -Notify $Notify `
+        -AllowInstall $AllowInstall -ExtraArgument $ExtraArgument) `
     -WorkingDirectory (Split-Path $ScriptPath -Parent)
 
 $trigger = New-UpdateTaskTrigger -Cadence $Cadence -DayOfWeek $DayOfWeek -At $At `
@@ -500,10 +513,13 @@ if ($PSCmdlet.ShouldProcess($fullTaskName, "Register scheduled task ($Cadence)")
     Write-Host '  The task runs only while you are logged on, so that it can show notifications.'
     Write-Host '  A run missed while the machine was off happens shortly after your next logon.'
     Write-Host ''
-    if ($Notify -and -not (Test-NotificationModuleAvailable)) {
+    if ($Notify -and -not (Test-NotificationModuleAvailable) -and
+        -not ($AllowInstall -contains 'All' -or $AllowInstall -contains 'BurntToast')) {
         Write-Host ''
         Write-Warning 'The task passes -Notify, but the BurntToast module is not installed, so it will run and notify nobody.'
-        Write-Warning 'Install it once with:  Install-Module BurntToast -Scope CurrentUser'
+        Write-Warning 'A scheduled run cannot prompt for consent to install it. Either install it once with:'
+        Write-Warning '    Install-Module BurntToast -Scope CurrentUser'
+        Write-Warning 'or re-register the task with -AllowInstall BurntToast.'
     }
 
     Write-Host ''

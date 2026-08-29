@@ -47,7 +47,7 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
 
         It 'does not try to install anything' {
             Mock Install-Module { }
-            $null = Initialize-NotificationSupport -InstallIfMissing -WarningAction SilentlyContinue
+            $null = Initialize-NotificationSupport -Approved @('BurntToast') -WarningAction SilentlyContinue
 
             Should-NotInvoke Install-Module
         }
@@ -58,17 +58,28 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
         BeforeEach {
             Mock Test-InteractiveSession { $true }
             Mock Get-Module { } -ParameterFilter { $Name -eq 'BurntToast' }
+            # Never reach a real prompt: PromptForChoice would block the suite
+            # forever on redirected stdin.
+            Mock Test-CanPrompt { $true }
+            Mock Request-InstallConsent { $false }
         }
 
         It 'declines rather than installing uninvited' {
             (Initialize-NotificationSupport -WarningAction SilentlyContinue).Available | Should-BeFalse
         }
 
+        # The install command now travels in the returned reason rather than a
+        # warning, so the closing summary can repeat it verbatim.
         It 'says how to install it' {
-            $warnings = @()
-            $null = Initialize-NotificationSupport -WarningVariable warnings -WarningAction SilentlyContinue
+            $result = Initialize-NotificationSupport -WarningAction SilentlyContinue
 
-            ($warnings -join ' ') | Should-MatchString 'Install-Module BurntToast'
+            $result.Reason | Should-MatchString 'Install-Module BurntToast'
+        }
+
+        It 'points at -AllowInstall as the other way in' {
+            $result = Initialize-NotificationSupport -WarningAction SilentlyContinue
+
+            $result.Reason | Should-MatchString '-AllowInstall BurntToast'
         }
 
         # The reason is returned as well as warned, so the end-of-run summary can
@@ -82,7 +93,7 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
             Mock Install-Module { }
             Mock Import-Module { }
 
-            $null = Initialize-NotificationSupport -InstallIfMissing 6>$null
+            $null = Initialize-NotificationSupport -Approved @('BurntToast') 6>$null
 
             Should-Invoke Install-Module -Times 1 -Exactly -ParameterFilter { $Name -eq 'BurntToast' }
         }
@@ -91,7 +102,7 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
             Mock Install-Module { }
             Mock Import-Module { }
 
-            $null = Initialize-NotificationSupport -InstallIfMissing 6>$null
+            $null = Initialize-NotificationSupport -Approved @('BurntToast') 6>$null
 
             Should-Invoke Install-Module -ParameterFilter { $Scope -eq 'CurrentUser' }
         }
@@ -100,7 +111,7 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
         It 'carries on when the install fails' {
             Mock Install-Module { throw 'no gallery' }
 
-            (Initialize-NotificationSupport -InstallIfMissing -WarningAction SilentlyContinue 6>$null).Available |
+            (Initialize-NotificationSupport -Approved @('BurntToast') -WarningAction SilentlyContinue 6>$null).Available |
                 Should-BeFalse
         }
     }
