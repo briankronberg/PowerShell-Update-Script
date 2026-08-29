@@ -7,18 +7,46 @@ can find, isolating each channel so one failure never stops the rest.
 ## Quick start
 
 ```powershell
-# Full run (self-elevates, includes Windows Update)
-.\Update-Everything.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1
+```
 
-# Everything except the OS update pass
-.\Update-Everything.ps1 -IncludeWindowsUpdate $false
+Everything except the OS update pass:
 
-# Unattended / standard user: no elevation prompt, admin steps flagged as failed
-.\Update-Everything.ps1 -SkipElevation -IncludeWindowsUpdate $false
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -IncludeWindowsUpdate $false
+```
+
+No elevation prompt — admin-only steps are reported as skipped:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -SkipElevation
 ```
 
 Requires PowerShell 5.1 or later (`#Requires -Version 5.1`). The script relaunches
 itself elevated unless `-SkipElevation` is passed.
+
+### Why the long command?
+
+`.\Update-Everything.ps1` is shorter and works fine **if** your execution policy
+already allows local scripts. On a machine set to `AllSigned` or `Restricted` it
+does not — the script is refused before it runs at all:
+
+```
+File ...\Update-Everything.ps1 cannot be loaded. The file is not digitally signed.
+```
+
+`-ExecutionPolicy Bypass` applies to that one process and nothing else. It
+changes no machine setting and leaves no trace once the process exits, which is
+why every example here uses it. Check what you are working with:
+
+```powershell
+Get-ExecutionPolicy -List
+```
+
+Note that the two editions are configured separately: Windows PowerShell
+(`powershell`) and PowerShell 7 (`pwsh`) can and often do have different
+policies, so a script that one refuses the other may run. If `pwsh` is not
+installed, substitute `powershell` in any command below.
 
 ## Parameters
 
@@ -71,21 +99,11 @@ are reported as skipped with that reason, instead of failing on a permissions
 error that reads like a bug:
 
 ```powershell
-.\Update-Everything.ps1 -SkipElevation
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -SkipElevation
 ```
 
-### Execution policy
-
-The elevated relaunch passes `-ExecutionPolicy Bypass`, but the *first* launch
-obeys whatever policy is in force. On a machine set to `AllSigned` or
-`Restricted` the script is blocked before it runs, with a "not digitally signed"
-error. Start it like this instead:
-
-```bash
-powershell -ExecutionPolicy Bypass -File .\Update-Everything.ps1
-```
-
-Check the current setting with `Get-ExecutionPolicy -List`.
+Note that the script's own elevated relaunch already passes
+`-ExecutionPolicy Bypass`, so only the *first* launch is subject to your policy.
 
 ## Channels covered
 
@@ -138,7 +156,7 @@ un-updated. Pass `-InstallNotificationModule` to have the script install it on
 first use.
 
 ```powershell
-.\Update-Everything.ps1 -Notify
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -Notify
 ```
 
 **Toasts need a desktop session.** They are drawn by the shell into an
@@ -152,12 +170,32 @@ scheduled task below runs as *you* rather than as `SYSTEM`.
 an **elevated** session, because the task itself runs with the highest
 privileges:
 
+Registering needs an elevated session. This opens one, runs the registration and
+stays open so you can read the result — it works from any directory, so there is
+no need to change into the repo first:
+
 ```powershell
-.\Register-UpdateTask.ps1                     # weekly, Wednesday at noon
-.\Register-UpdateTask.ps1 -Cadence PatchTuesday
-.\Register-UpdateTask.ps1 -Cadence Weekly -DayOfWeek Saturday -At 09:00
-.\Register-UpdateTask.ps1 -Show               # what is registered right now
-.\Register-UpdateTask.ps1 -Unregister         # remove it
+Start-Process pwsh -Verb RunAs -ArgumentList '-NoExit','-NoProfile','-ExecutionPolicy','Bypass','-File','D:\PowerShell-Update-Script\Register-UpdateTask.ps1','-Cadence','Weekly'
+```
+
+Substitute your own path to the repository. Other cadences:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Register-UpdateTask.ps1 -Cadence PatchTuesday
+```
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Register-UpdateTask.ps1 -Cadence Weekly -DayOfWeek Saturday -At 09:00
+```
+
+Inspecting and removing the task need no elevation:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Register-UpdateTask.ps1 -Show
+```
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Register-UpdateTask.ps1 -Unregister
 ```
 
 ### Choosing a cadence
@@ -228,10 +266,10 @@ Run the suite through `test.ps1`, the same entry point CI uses, so a green run
 locally means a green run in the pipeline:
 
 ```powershell
-.\test.ps1                      # everything
-.\test.ps1 -Tag Static          # script contract only
-.\test.ps1 -ExcludeTag Lint     # skip the analyzer pass
-.\test.ps1 -CI                  # non-zero exit on failure, writes testResults.xml
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\test.ps1                   # everything
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -Tag Static       # script contract only
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -ExcludeTag Lint  # skip the analyzer pass
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -CI               # non-zero exit on failure
 ```
 
 Tests are tagged `Static` (the script's parameter contract, help and step

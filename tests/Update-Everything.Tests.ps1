@@ -339,6 +339,21 @@ Describe 'Repository documentation' -Tag 'Docs' {
     It 'warns that there is no support' {
         $script:Readme | Should-MatchString '(?s)## Support'
     }
+
+    It 'explains the execution policy trap' {
+        $script:Readme | Should-MatchString 'ExecutionPolicy Bypass'
+    }
+
+    # Every example has to survive an AllSigned or Restricted machine, where a
+    # bare .\script.ps1 is refused before it runs. This caught real breakage:
+    # the README's own quick start could not be pasted onto the machine it was
+    # written on.
+    It 'offers no example that a locked-down machine would refuse' {
+        $offenders = $script:Readme -split "`r?`n" |
+            Where-Object { $_ -match '^\s*\.\[A-Za-z][A-Za-z0-9-]*\.ps1' }
+
+        $offenders | Should-BeNull -Because "these are refused under AllSigned:`n$($offenders -join "`n")"
+    }
 }
 
 Describe 'PSScriptAnalyzer' -Tag 'Lint' -Skip:(-not $HasAnalyzer) {
