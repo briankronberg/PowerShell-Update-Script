@@ -35,7 +35,7 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
 
         # A scheduled task running as SYSTEM has no desktop to draw a toast on.
         It 'reports notifications as unavailable' {
-            Initialize-NotificationSupport -WarningAction SilentlyContinue | Should-BeFalse
+            (Initialize-NotificationSupport -WarningAction SilentlyContinue).Available | Should-BeFalse
         }
 
         It 'explains why, so the schedule can be fixed' {
@@ -61,7 +61,7 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
         }
 
         It 'declines rather than installing uninvited' {
-            Initialize-NotificationSupport -WarningAction SilentlyContinue | Should-BeFalse
+            (Initialize-NotificationSupport -WarningAction SilentlyContinue).Available | Should-BeFalse
         }
 
         It 'says how to install it' {
@@ -69,6 +69,13 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
             $null = Initialize-NotificationSupport -WarningVariable warnings -WarningAction SilentlyContinue
 
             ($warnings -join ' ') | Should-MatchString 'Install-Module BurntToast'
+        }
+
+        # The reason is returned as well as warned, so the end-of-run summary can
+        # repeat it. By then the warning itself is thousands of lines back.
+        It 'returns a reason the summary can repeat' {
+            $result = Initialize-NotificationSupport -WarningAction SilentlyContinue
+            $result.Reason | Should-MatchString 'not installed'
         }
 
         It 'installs when explicitly asked' {
@@ -93,7 +100,7 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
         It 'carries on when the install fails' {
             Mock Install-Module { throw 'no gallery' }
 
-            Initialize-NotificationSupport -InstallIfMissing -WarningAction SilentlyContinue 6>$null |
+            (Initialize-NotificationSupport -InstallIfMissing -WarningAction SilentlyContinue 6>$null).Available |
                 Should-BeFalse
         }
     }
@@ -107,12 +114,12 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
 
         It 'reports notifications as available' {
             Mock Import-Module { }
-            Initialize-NotificationSupport | Should-BeTrue
+            (Initialize-NotificationSupport).Available | Should-BeTrue
         }
 
         It 'carries on when the module will not load' {
             Mock Import-Module { throw 'corrupt module' }
-            Initialize-NotificationSupport -WarningAction SilentlyContinue | Should-BeFalse
+            (Initialize-NotificationSupport -WarningAction SilentlyContinue).Available | Should-BeFalse
         }
     }
 }
@@ -132,6 +139,33 @@ Describe 'Send-UpdateNotification' -Tag 'Unit','Notification' {
             Send-UpdateNotification -Text 'x'
 
             Should-NotInvoke New-BurntToastNotification
+        }
+
+        It 'sends nothing urgent either' {
+            $script:NotificationsAvailable = $false
+            Send-UpdateNotification -Text 'Restart required' -Urgent
+
+            Should-NotInvoke New-BurntToastNotification
+        }
+
+        # The flag is initialised to $false by the main body before any step
+        # runs. If that were ever missed, an unset variable is still falsy, so
+        # the failure mode is silence rather than a crash at the end of a long
+        # run.
+        It 'treats an uninitialised flag as unavailable' {
+            Remove-Variable -Name NotificationsAvailable -Scope Script -ErrorAction SilentlyContinue
+            Send-UpdateNotification -Text 'x'
+
+            Should-NotInvoke New-BurntToastNotification
+        }
+
+        It 'does not throw when it cannot send' {
+            $script:NotificationsAvailable = $false
+            $warnings = @()
+            Send-UpdateNotification -Text 'x' -WarningVariable warnings -WarningAction SilentlyContinue
+
+            # Silence, not a warning: the caller was already told at startup.
+            $warnings | Should-BeNull
         }
     }
 

@@ -149,11 +149,37 @@ Notifications need the [BurntToast](https://github.com/Windos/BurntToast) module
 Install-Module BurntToast -Scope CurrentUser
 ```
 
-It is an optional dependency, never a hard one. If the module is missing, or the
-run has no interactive desktop session to draw on, the script warns once and
-carries on. A notification failing must never be the reason a machine goes
-un-updated. Pass `-InstallNotificationModule` to have the script install it on
-first use.
+It is an optional dependency, never a hard one. A notification failing must never
+be the reason a machine goes un-updated, so if the module is missing — or the run
+has no interactive desktop session to draw on — the script carries on and updates
+everything as usual.
+
+You are told three times, in the places you would actually look:
+
+1. **When you register the scheduled task**, if it passes `-Notify` and the
+   module is not installed. This is the moment you can fix it.
+2. **At the start of the run**, before the first update step — so on a long run
+   the warning is at the top of the transcript, not lost after it.
+3. **In the closing summary**, which repeats the reason, because by then the
+   startup warning is thousands of lines back.
+
+```
+[!] Notifications were requested but could not be sent.
+    Reason: the BurntToast module is not installed. Install it with
+    "Install-Module BurntToast -Scope CurrentUser", or re-run with
+    -InstallNotificationModule.
+    The update run itself was unaffected.
+```
+
+Internally a single flag, initialised to `$false` before any step runs, decides
+whether a toast is attempted at all. `Send-UpdateNotification` checks it and
+returns silently, so no send is ever tried against a module that is not there —
+and nothing repeats the warning per notification, since you were already told.
+
+Pass `-InstallNotificationModule` to have the script install BurntToast on first
+use. That install now happens up front too, so a run that was asked to notify can
+actually do so, rather than installing the module after the work it was meant to
+report on.
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -Notify

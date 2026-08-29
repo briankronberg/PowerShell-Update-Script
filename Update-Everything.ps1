@@ -90,8 +90,13 @@
     for scheduled runs, where the summary would otherwise go unseen.
 
     Requires the BurntToast module (https://github.com/Windos/BurntToast) and an
-    interactive desktop session. Missing module or non-interactive session
-    degrades to no notifications; it never fails the run.
+    interactive desktop session. Either being absent degrades to no
+    notifications; it never fails the run.
+
+    That check happens before the first update step, not at the end, so the
+    warning lands at the top of the transcript rather than after a long run.
+    The reason is repeated in the closing summary, because by then the original
+    warning has scrolled well out of sight.
 
 .PARAMETER InstallNotificationModule
     Install BurntToast from the PowerShell Gallery (CurrentUser scope) if -Notify
@@ -396,12 +401,16 @@ function Test-BurntToastSupportsUrgent {
 }
 
 function Initialize-NotificationSupport {
-    # Prepares toast notifications, and reports whether they are usable. Toasts
-    # are a convenience: every failure path here returns $false rather than
+    # Prepares toast notifications, and reports whether they are usable and why
+    # not. Toasts are a convenience: every failure path here reports rather than
     # throwing, because a missing notification module must never be the reason a
     # maintenance run does not happen.
+    #
+    # The reason is returned, not just logged, so the end-of-run summary can
+    # repeat it. A warning printed at the moment of discovery has scrolled well
+    # out of sight by the time a long run finishes.
     [CmdletBinding()]
-    [OutputType([bool])]
+    [OutputType([pscustomobject])]
     param(
         # Pull BurntToast from the PowerShell Gallery when it is missing.
         [switch] $InstallIfMissing
@@ -411,30 +420,34 @@ function Initialize-NotificationSupport {
     # service or a SYSTEM-run scheduled task there is no session to draw into,
     # and the call either fails or posts a notification nobody can see.
     if (-not (Test-InteractiveSession)) {
-        Write-Warning 'Notifications requested, but this is not an interactive session; toasts cannot be shown. Schedule the task to run as your own user while logged on.'
-        return $false
+        $reason = 'this is not an interactive session, so a toast has no desktop to appear on. Schedule the task to run as your own user while logged on.'
+        Write-Warning "Notifications requested, but $reason"
+        return [pscustomobject]@{ Available = $false; Reason = $reason }
     }
 
     if (-not (Get-Module BurntToast -ListAvailable)) {
         if (-not $InstallIfMissing) {
-            Write-Warning 'Notifications requested, but the BurntToast module is not installed. Install it with "Install-Module BurntToast -Scope CurrentUser", or pass -InstallNotificationModule.'
-            return $false
+            $reason = 'the BurntToast module is not installed. Install it with "Install-Module BurntToast -Scope CurrentUser", or re-run with -InstallNotificationModule.'
+            Write-Warning "Notifications requested, but $reason"
+            return [pscustomobject]@{ Available = $false; Reason = $reason }
         }
         try {
             Write-Host 'Installing BurntToast (CurrentUser) for notifications...'
             Install-Module -Name BurntToast -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
         } catch {
-            Write-Warning "Could not install BurntToast: $($_.Exception.Message). Continuing without notifications."
-            return $false
+            $reason = "BurntToast could not be installed: $($_.Exception.Message)"
+            Write-Warning "$reason. Continuing without notifications."
+            return [pscustomobject]@{ Available = $false; Reason = $reason }
         }
     }
 
     try {
         Import-Module BurntToast -ErrorAction Stop
-        return $true
+        return [pscustomobject]@{ Available = $true; Reason = 'BurntToast loaded.' }
     } catch {
-        Write-Warning "Could not load BurntToast: $($_.Exception.Message). Continuing without notifications."
-        return $false
+        $reason = "BurntToast is installed but would not load: $($_.Exception.Message)"
+        Write-Warning "$reason. Continuing without notifications."
+        return [pscustomobject]@{ Available = $false; Reason = $reason }
     }
 }
 
@@ -457,6 +470,8 @@ function Send-UpdateNotification {
         [string] $UniqueIdentifier = 'Update-Everything'
     )
 
+    # Set once, up front, by the main body. Defaulted to $false there rather than
+    # left unset, so a missed initialisation cannot be mistaken for "available".
     if (-not $script:NotificationsAvailable) { return }
 
     try {
@@ -833,6 +848,19 @@ try {
     $transcriptRunning = $true
 } catch {
     Write-Warning "Transcript unavailable ($($_.Exception.Message)); per-step logs are unaffected."
+}
+
+# Notifications are resolved before any work starts, not after it. A warning
+# raised at the end has scrolled past on an interactive run, and on a scheduled
+# run there is no console reading it at all -- here it lands near the top of the
+# transcript, where someone looking for "why did I not get a toast" will find it.
+# It also means -InstallNotificationModule installs before the run rather than
+# after everything it was meant to report on.
+$script:NotificationsAvailable = $false
+$notificationStatus = $null
+if ($Notify) {
+    $notificationStatus = Initialize-NotificationSupport -InstallIfMissing:$InstallNotificationModule
+    $script:NotificationsAvailable = $notificationStatus.Available
 }
 
 $Results = [System.Collections.Generic.List[object]]::new()
@@ -1327,8 +1355,6 @@ if ($reboot.IsPending) {
 }
 
 if ($Notify) {
-    $script:NotificationsAvailable = Initialize-NotificationSupport -InstallIfMissing:$InstallNotificationModule
-
     $okCount      = @($Results | Where-Object { $_.Status -eq 'OK' }).Count
     $skippedCount = @($Results | Where-Object { $_.Status -eq 'Skipped' }).Count
     $headline     = if ($failedSteps.Count) { "Updates finished with $($failedSteps.Count) failure(s)" } else { 'Updates finished' }
@@ -1349,6 +1375,14 @@ if ($Notify) {
             (($reboot.Reasons | Select-Object -First 2) -join '; ')
         )
     }
+}
+
+# Repeated here because the warning at startup is thousands of lines back by now.
+if ($Notify -and -not $script:NotificationsAvailable) {
+    Write-Host ''
+    Write-Host '[!] Notifications were requested but could not be sent.' -ForegroundColor Yellow
+    Write-Host "    Reason: $($notificationStatus.Reason)" -ForegroundColor Yellow
+    Write-Host '    The update run itself was unaffected.' -ForegroundColor Yellow
 }
 
 Write-Host "Finished $(Get-Date). Detailed logs saved to: $logDir" -ForegroundColor Green
