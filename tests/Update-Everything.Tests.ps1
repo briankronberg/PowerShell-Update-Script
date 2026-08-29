@@ -274,6 +274,42 @@ Describe 'Update-Everything.ps1' -Tag 'Static' {
     # makes a missing property fatal, and this script legitimately probes for
     # optional keys in settings.json. Static analysis buys the useful half
     # without the breakage.
+    # "| Select-Object -First 1" stops the upstream pipeline. Inside a step,
+    # where every stream is merged with *>&1, Start-Transcript records that stop
+    # as 'TerminatingError(): "The pipeline has been stopped."' -- alarming
+    # output for a run in which nothing went wrong.
+    Context 'Transcript noise' {
+
+        It 'does not halt a pipeline inside a step action' {
+            $stepBodies = $script:Ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst] -and
+                    $node.GetCommandName() -eq 'Invoke-Step'
+                }, $true)
+
+            # Matched through the AST rather than the text: a comment explaining
+            # why Select-Object -First is avoided would otherwise flag the very
+            # step that avoids it.
+            $offenders = foreach ($call in $stepBodies) {
+                $halts = $call.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.CommandAst] -and
+                        $node.GetCommandName() -eq 'Select-Object' -and
+                        ($node.CommandElements | Where-Object {
+                            $_ -is [System.Management.Automation.Language.CommandParameterAst] -and
+                            $_.ParameterName -eq 'First'
+                        })
+                    }, $true)
+
+                if ($halts) {
+                    "line $($call.Extent.StartLineNumber): $(($call.CommandElements[2]).Value)"
+                }
+            }
+
+            $offenders | Should-BeNull -Because "these log a spurious pipeline-stopped error:`n$($offenders -join "`n")"
+        }
+    }
+
     Context 'Variable hygiene' {
 
         It 'reads no variable it never assigns' {

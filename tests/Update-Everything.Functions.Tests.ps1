@@ -154,7 +154,10 @@ Describe 'Test-PendingReboot' -Tag 'Unit' {
         # v6 no longer falls through to the real command when no ParameterFilter
         # matches, so a catch-all mock has to exist alongside the specific ones.
         Mock Test-Path { $false }
-        Mock Get-ItemProperty { throw [System.Management.Automation.ItemNotFoundException]::new('not found') }
+        # Returns nothing rather than throwing: the probe now reads the key with
+        # -ErrorAction SilentlyContinue and looks for the value itself, and a
+        # mock that throws would ignore that and propagate.
+        Mock Get-ItemProperty { }
     }
 
     It 'reports nothing pending on a clean machine' {
@@ -182,7 +185,7 @@ Describe 'Test-PendingReboot' -Tag 'Unit' {
 
     It 'detects pending file renames' {
         Mock Get-ItemProperty { [pscustomobject]@{ PendingFileRenameOperations = @('a', 'b') } } `
-            -ParameterFilter { $Name -eq 'PendingFileRenameOperations' }
+            -ParameterFilter { $LiteralPath -like '*Session Manager' }
 
         $result = Test-PendingReboot
         $result.IsPending | Should-BeTrue
@@ -193,7 +196,28 @@ Describe 'Test-PendingReboot' -Tag 'Unit' {
     # would tell every user to reboot after every run.
     It 'ignores an empty PendingFileRenameOperations value' {
         Mock Get-ItemProperty { [pscustomobject]@{ PendingFileRenameOperations = @('', $null) } } `
-            -ParameterFilter { $Name -eq 'PendingFileRenameOperations' }
+            -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).IsPending | Should-BeFalse
+    }
+
+    # Asking for a value that is absent, with -ErrorAction Stop, throws -- and
+    # Start-Transcript records the throw as "TerminatingError(Get-ItemProperty)"
+    # in the run log even though it is caught. On a healthy machine that reads
+    # like a fault. Read the key, then look for the value.
+    It 'does not ask the registry for a value that may not exist' {
+        $source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1') -Raw
+        $probe = [regex]::Match($source, '(?s)function Test-PendingReboot.*?
+\}').Value
+
+        $probe | Should-NotMatchString '-Name PendingFileRenameOperations'
+    }
+
+    # A key that exists but carries no PendingFileRenameOperations value is the
+    # normal case, and must not be read as a pending reboot.
+    It 'ignores a Session Manager key without the value at all' {
+        Mock Get-ItemProperty { [pscustomobject]@{ SomethingElse = 1 } } `
+            -ParameterFilter { $LiteralPath -like '*Session Manager' }
 
         (Test-PendingReboot).IsPending | Should-BeFalse
     }

@@ -875,7 +875,9 @@ function Set-PwshAsWindowsTerminalDefault {
         "$env:LOCALAPPDATA\Packages\Microsoft.WindowsTerminalPreview_8wekyb3d8bbwe\LocalState\settings.json",
         "$env:LOCALAPPDATA\Microsoft\Windows Terminal\settings.json"
     )
-    $settingsPath = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    # Indexed, not Select-Object -First: see the note in the Microsoft 365 step.
+    $present = @($candidates | Where-Object { Test-Path -LiteralPath $_ })
+    $settingsPath = if ($present.Count) { $present[0] } else { $null }
     if (-not $settingsPath) {
         Write-Host 'Windows Terminal settings.json not found; Terminal not installed for this user. Skipping.'
         return
@@ -1001,15 +1003,21 @@ foreach ($entry in $rebootKeys.GetEnumerator()) {
 
 # PendingFileRenameOperations exists as an empty value on plenty of healthy
 # machines, so test the value rather than the presence of the property.
-try {
-    $sm = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
-        -Name PendingFileRenameOperations -ErrorAction Stop
-    $pendingRenames = @($sm.PendingFileRenameOperations | Where-Object { $_ })
+# Read the key and look for the value, rather than asking for the value and
+# catching the failure. -Name with -ErrorAction Stop throws when the property is
+# absent -- the normal, healthy case -- and Start-Transcript dutifully records
+# that as "TerminatingError(Get-ItemProperty)" in the run log, where it reads
+# like something went wrong on a machine where nothing did.
+$sessionManager = Get-ItemProperty -LiteralPath 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' `
+    -ErrorAction SilentlyContinue
+if ($sessionManager -and
+    $sessionManager.PSObject.Properties.Name -contains 'PendingFileRenameOperations') {
+    $pendingRenames = @($sessionManager.PendingFileRenameOperations | Where-Object { $_ })
     if ($pendingRenames.Count -gt 0) {
         $pendingReboot = $true
         $rebootReasons.Add("Pending file renames ($($pendingRenames.Count))")
     }
-} catch { }
+}
 
 # A queued computer rename also needs a restart to take effect.
 try {
@@ -1241,10 +1249,14 @@ if ($IncludePowerShell7) {
 # ---------------------------------------------------------------------------
 Invoke-Step -Name 'Microsoft 365 Apps' -Action {
     $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
-    $c2r   = $roots |
+    # Indexed rather than "| Select-Object -First 1": that stops the upstream
+    # pipeline, and inside a step -- where every stream is merged with *>&1 --
+    # the transcript records the stop as 'TerminatingError(): "The pipeline has
+    # been stopped."'. Nothing is wrong, but it reads as though something is.
+    $found = @($roots |
         ForEach-Object { Join-Path $_ 'Common Files\Microsoft Shared\ClickToRun\OfficeC2RClient.exe' } |
-        Where-Object { Test-Path -LiteralPath $_ } |
-        Select-Object -First 1
+        Where-Object { Test-Path -LiteralPath $_ })
+    $c2r = if ($found.Count) { $found[0] } else { $null }
 
     if (-not $c2r) {
         Write-Host 'OfficeC2RClient.exe not found; no click-to-run Office install. Skipping.'
@@ -1380,9 +1392,25 @@ Invoke-Step -Name 'pipx packages' -RequiresCommand 'pipx' -Action {
 Invoke-Step -Name 'npm' -RequiresCommand 'npm' -Action {
     # npm writes progress and deprecation notices to stderr as a matter of course,
     # so judge it by exit code only.
-    npm install -g npm@latest
+    # Output is captured as well as passed through, because the reason npm failed
+    # is usually in it.
+    $npmOutput = npm install -g npm@latest 2>&1
+    $npmOutput
     if ($LASTEXITCODE -ne 0) {
-        Write-Error "npm self-update failed with exit code $LASTEXITCODE."
+        $npmText = $npmOutput | Out-String
+
+        # EBADENGINE means the newest npm does not support the installed Node,
+        # which is a fact about this machine rather than a fault in the update.
+        # Said plainly, because "exit code 1" sends people looking in the wrong
+        # place.
+        if ($npmText -match 'EBADENGINE') {
+            $nodeVersion = try { node --version 2>$null } catch { 'unknown' }
+            Write-Error ("npm could not update itself: the latest npm does not support the installed Node.js ($nodeVersion). " +
+                'npm reported EBADENGINE and left the existing npm in place, so nothing is broken. ' +
+                'Moving to a Node.js version npm supports (an LTS release) clears this.')
+        } else {
+            Write-Error "npm self-update failed with exit code $LASTEXITCODE. npm's own message is in this step's log."
+        }
         $global:LASTEXITCODE = 0
     }
 
@@ -1404,7 +1432,7 @@ Invoke-Step -Name '.NET global tools' -RequiresCommand 'dotnet' -Action {
     # 'dotnet' exists for runtime-only installs too, and 'dotnet --version' fails
     # outright when there is no SDK or when a global.json pins a missing one.
     # Validate the string before casting it to an int.
-    $verRaw = (dotnet --version 2>&1 | Select-Object -First 1 | Out-String).Trim()
+    $verRaw = (@(dotnet --version 2>&1)[0] | Out-String).Trim()
     $verOk  = ($LASTEXITCODE -eq 0)
     $global:LASTEXITCODE = 0
 
