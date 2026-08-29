@@ -82,3 +82,41 @@ Invoke-ScriptAnalyzer .\Update-Everything.ps1 -Settings .\PSScriptAnalyzerSettin
 History note: the first three commits are the v1 → v2 → v3 revisions of the
 script as it was developed, so `git log -p Update-Everything.ps1` shows why each
 guard exists.
+
+## Support
+
+**There is none.** This is a personal maintenance script published in the hope
+it is useful to someone else. It is not a product, it carries no warranty, and
+nobody is on the hook to fix it, answer questions, or keep it working.
+
+Issues and pull requests are welcome and may well be read, but no response is
+promised and none should be inferred from silence.
+
+### Read this before your first run
+
+The script makes real, sometimes irreversible changes to a machine:
+
+- It **elevates to Administrator** and installs software machine-wide.
+- It **installs pending Windows and Microsoft updates** by default
+  (`-IncludeWindowsUpdate $true`), which can require a reboot.
+- It **installs or upgrades PowerShell 7** by default (`-IncludePowerShell7 $true`).
+- It **edits Windows Terminal's `settings.json`** to change the default profile
+  (`-SetPwshTerminalDefault $true`). The file is backed up first, into the log
+  directory.
+- It upgrades packages across every manager it finds, which can move pinned
+  toolchains to versions your projects were not expecting. `-UpdateGlobalNpm`
+  is off by default for exactly this reason.
+
+Read the script before running it, and try the cautious combination first:
+
+```powershell
+.\Update-Everything.ps1 -IncludeWindowsUpdate $false -IncludePowerShell7 $false -SetPwshTerminalDefault $false
+```
+
+Every step writes a log, so you can see precisely what happened afterwards.
+
+## License
+
+[MIT](LICENSE) — free to use, copy, modify, and redistribute, commercially or
+otherwise, provided the copyright notice and license text come along. The
+software is provided **as is**, without warranty of any kind.
