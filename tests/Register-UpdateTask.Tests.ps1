@@ -318,11 +318,45 @@ Describe 'Registration safety' -Tag 'Static' {
 
     # The script's own closing advice has to be runnable on the machine it just
     # printed it to, and that machine may well be AllSigned.
+    # Registering a task that passes -Notify while BurntToast is missing produces
+    # a schedule that runs and tells nobody. Registration is the moment someone
+    # can act on that.
+    It 'warns when notifications are requested without the module' {
+        $script:Source | Should-MatchString 'Install-Module BurntToast'
+    }
+
     It 'suggests no command a locked-down machine would refuse' {
         $offenders = $script:Source -split "`r?`n" |
             Where-Object { $_ -match 'Write-Host.*\.\[A-Za-z][A-Za-z0-9-]*\.ps1' }
 
         $offenders | Should-BeNull -Because "these are refused under AllSigned:`n$($offenders -join "`n")"
+    }
+}
+
+Describe 'Format-LastRunResult' -Tag 'Unit' {
+
+    # A task registered a minute ago reports 30 Nov 1999 / 0x41303, which read
+    # literally looks like a failure rather than "has not run yet".
+    It 'says never for a task that has not run' {
+        Format-LastRunResult -LastRunTime ([datetime] '1999-11-30') -LastTaskResult 267011 |
+            Should-Be 'never'
+    }
+
+    It 'says never for the sentinel date even if the result code differs' {
+        Format-LastRunResult -LastRunTime ([datetime] '1999-11-30') -LastTaskResult 0 |
+            Should-Be 'never'
+    }
+
+    It 'reports a successful run' {
+        Format-LastRunResult -LastRunTime ([datetime] '2026-09-02T12:00:00') -LastTaskResult 0 |
+            Should-MatchString 'succeeded'
+    }
+
+    # The script exits with the number of failed steps, so 3 means three steps
+    # failed, not a Windows error code.
+    It 'reports the exit code of a failed run' {
+        Format-LastRunResult -LastRunTime ([datetime] '2026-09-02T12:00:00') -LastTaskResult 3 |
+            Should-MatchString 'exit 3'
     }
 }
 
