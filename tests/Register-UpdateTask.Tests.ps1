@@ -325,9 +325,11 @@ Describe 'Registration safety' -Tag 'Static' {
         $script:Source | Should-MatchString 'Install-Module BurntToast'
     }
 
+    # Plain string matching, not a regex: the regex version needed an escaped
+    # backslash, lost it in tooling, and matched nothing at all.
     It 'suggests no command a locked-down machine would refuse' {
         $offenders = $script:Source -split "`r?`n" |
-            Where-Object { $_ -match 'Write-Host.*\.\[A-Za-z][A-Za-z0-9-]*\.ps1' }
+            Where-Object { $_ -match 'Write-Host' -and $_.Contains('.\') -and $_ -match '\.ps1' }
 
         $offenders | Should-BeNull -Because "these are refused under AllSigned:`n$($offenders -join "`n")"
     }

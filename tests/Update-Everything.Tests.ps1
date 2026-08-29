@@ -413,11 +413,35 @@ Describe 'Repository documentation' -Tag 'Docs' {
     # bare .\script.ps1 is refused before it runs. This caught real breakage:
     # the README's own quick start could not be pasted onto the machine it was
     # written on.
+    # Written with StartsWith rather than a regex on purpose. The regex form
+    # needed a backslash escaped through several layers of tooling, lost one on
+    # the way, and silently matched nothing -- so the guard passed for months
+    # while a bare invocation sat in the file it was guarding.
     It 'offers no example that a locked-down machine would refuse' {
         $offenders = $script:Readme -split "`r?`n" |
-            Where-Object { $_ -match '^\s*\.\[A-Za-z][A-Za-z0-9-]*\.ps1' }
+            Where-Object { $_.TrimStart().StartsWith('.\') -and $_ -match '\.ps1' }
 
         $offenders | Should-BeNull -Because "these are refused under AllSigned:`n$($offenders -join "`n")"
+    }
+
+    # The other direction. 'README documents -<Name>' catches a parameter that
+    # gained no documentation; this catches documentation left behind by a
+    # parameter that was removed. -InstallNotificationModule sat in the README
+    # for several commits after it stopped existing, telling readers to pass a
+    # switch the script would reject.
+    It 'documents no parameter the script no longer has' {
+        $section = [regex]::Match(
+            $script:Readme, '(?s)## Parameters\r?\n(.*?)\r?\n## ').Groups[1].Value
+
+        $section | Should-NotBeEmptyString -Because 'the parameter table should still be findable'
+
+        $documented = [regex]::Matches($section, '\| `-(\w+)`') |
+            ForEach-Object { $_.Groups[1].Value }
+
+        $real = (Get-Command $script:ScriptPath).Parameters.Keys
+        $ghosts = $documented | Where-Object { $_ -notin $real }
+
+        $ghosts | Should-BeNull -Because "the script has no such parameter: $($ghosts -join ', ')"
     }
 }
 
