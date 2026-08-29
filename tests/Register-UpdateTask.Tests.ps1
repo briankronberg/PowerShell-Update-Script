@@ -224,14 +224,20 @@ Describe 'Random start delay' -Tag 'Unit' {
             Should-BeFalse -Because 'if this ever changes, the trigger workaround can be simplified'
     }
 
-    It 'spreads the start time of a <_> trigger' -ForEach @('Daily', 'Weekly') {
+    # RandomDelay is a *string* CIM property holding an ISO 8601 duration.
+    # Asserting against a [timespan] here is what let the original bug ship:
+    # PowerShell coerced the comparison, so a stored "00:15:00" compared equal
+    # to [timespan] '00:15:00' and the test passed -- while
+    # Register-ScheduledTask rejected the task XML outright. Compare strings.
+    It 'spreads the start time of the <_> trigger as an ISO 8601 duration' -ForEach @('Daily', 'Weekly', 'PatchTuesday') {
         $trigger = New-UpdateTaskTrigger -Cadence $_ -DayOfWeek Wednesday -At '12:00' -RandomDelayMinutes 15
-        $trigger.RandomDelay | Should-Be ([timespan] '00:15:00')
+        $trigger.RandomDelay | Should-BeString 'PT15M'
     }
 
-    It 'spreads the start time of the monthly trigger, as an ISO 8601 duration' {
-        $trigger = New-UpdateTaskTrigger -Cadence PatchTuesday -DayOfWeek Wednesday -At '12:00' -RandomDelayMinutes 15
-        $trigger.RandomDelay | Should-Be 'PT15M'
+    # The exact shape Task Scheduler rejected, named so it cannot come back.
+    It 'never stores the <_> delay in .NET TimeSpan format' -ForEach @('Daily', 'Weekly', 'PatchTuesday') {
+        $trigger = New-UpdateTaskTrigger -Cadence $_ -DayOfWeek Wednesday -At '12:00' -RandomDelayMinutes 15
+        $trigger.RandomDelay | Should-NotBeString '00:15:00' -Because 'the task XML rejects that format'
     }
 
     It 'omits the delay when set to zero' {
@@ -285,6 +291,38 @@ Describe 'Get-CadenceDescription' -Tag 'Unit' {
     It 'explains the Patch Tuesday schedule' {
         Get-CadenceDescription -Cadence PatchTuesday -DayOfWeek Wednesday -At '12:00' |
             Should-MatchString 'third Wednesday'
+    }
+}
+
+Describe 'Registration safety' -Tag 'Static' {
+
+    BeforeAll {
+        $script:Source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Register-UpdateTask.ps1') -Raw
+        $script:Ast = [System.Management.Automation.Language.Parser]::ParseInput(
+            $script:Source, [ref] $null, [ref] $null)
+    }
+
+    # Register-ScheduledTask reports a rejected task XML as a *non-terminating*
+    # error. Without -ErrorAction Stop the script ran on and announced success
+    # over the top of a failure, having registered nothing.
+    It 'stops on a failed registration instead of reporting success' {
+        $call = $script:Ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -eq 'Register-ScheduledTask'
+            }, $true) | Select-Object -First 1
+
+        $call | Should-NotBeNull
+        $call.Extent.Text | Should-MatchString '-ErrorAction Stop'
+    }
+
+    # The script's own closing advice has to be runnable on the machine it just
+    # printed it to, and that machine may well be AllSigned.
+    It 'suggests no command a locked-down machine would refuse' {
+        $offenders = $script:Source -split "`r?`n" |
+            Where-Object { $_ -match 'Write-Host.*\.\[A-Za-z][A-Za-z0-9-]*\.ps1' }
+
+        $offenders | Should-BeNull -Because "these are refused under AllSigned:`n$($offenders -join "`n")"
     }
 }
 

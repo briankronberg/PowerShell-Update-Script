@@ -108,6 +108,7 @@
 .OUTPUTS
     Exit code:
       0   the task was registered, removed, or reported
+      1   the task could not be registered
       64  not running elevated, or the script to schedule could not be found
 
 .NOTES
@@ -231,18 +232,22 @@ function New-UpdateTaskTrigger {
         [int] $RandomDelayMinutes = 0
     )
 
-    $delay = if ($RandomDelayMinutes -gt 0) { New-TimeSpan -Minutes $RandomDelayMinutes } else { $null }
+    # RandomDelay is a *string* CIM property holding an ISO 8601 duration, so
+    # assigning a [TimeSpan] to it after the fact writes "00:15:00" and
+    # Register-ScheduledTask then rejects the task XML with "contains a value
+    # which is incorrectly formatted or out of range". The cmdlet's own
+    # -RandomDelay parameter converts a TimeSpan properly, to "PT15M".
+    $extra = @{}
+    if ($RandomDelayMinutes -gt 0) {
+        $extra['RandomDelay'] = New-TimeSpan -Minutes $RandomDelayMinutes
+    }
 
     switch ($Cadence) {
         'Daily' {
-            $trigger = New-ScheduledTaskTrigger -Daily -At $At
-            if ($delay) { $trigger.RandomDelay = $delay }
-            return $trigger
+            return New-ScheduledTaskTrigger -Daily -At $At @extra
         }
         'Weekly' {
-            $trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayOfWeek -At $At
-            if ($delay) { $trigger.RandomDelay = $delay }
-            return $trigger
+            return New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayOfWeek -At $At @extra
         }
         'PatchTuesday' {
             # Third Wednesday of every month. Bitmasks, not names:
@@ -433,15 +438,26 @@ $description = 'Runs Update-Everything.ps1 to update Windows, Microsoft 365, and
     'https://github.com/briankronberg/PowerShell-Update-Script'
 
 if ($PSCmdlet.ShouldProcess($fullTaskName, "Register scheduled task ($Cadence)")) {
-    $null = Register-ScheduledTask `
-        -TaskName $TaskName `
-        -TaskPath $TaskPath `
-        -Action $action `
-        -Trigger $trigger `
-        -Settings $settings `
-        -Principal $principal `
-        -Description $description `
-        -Force
+    try {
+        # -ErrorAction Stop, because Register-ScheduledTask reports a rejected
+        # task XML as a non-terminating error. Without this the script carried
+        # straight on and printed "Registered" over the top of the failure,
+        # having registered nothing at all.
+        $null = Register-ScheduledTask `
+            -TaskName $TaskName `
+            -TaskPath $TaskPath `
+            -Action $action `
+            -Trigger $trigger `
+            -Settings $settings `
+            -Principal $principal `
+            -Description $description `
+            -Force `
+            -ErrorAction Stop
+    } catch {
+        Write-Error "Could not register '$fullTaskName': $($_.Exception.Message)"
+        Write-Warning 'Nothing has been scheduled.'
+        exit 1
+    }
 
     Write-Host ''
     Write-Host "Registered '$fullTaskName'." -ForegroundColor Green
@@ -452,7 +468,8 @@ if ($PSCmdlet.ShouldProcess($fullTaskName, "Register scheduled task ($Cadence)")
     Write-Host '  The task runs only while you are logged on, so that it can show notifications.'
     Write-Host '  A run missed while the machine was off happens shortly after your next logon.'
     Write-Host ''
-    Write-Host "  Inspect it later with: .\Register-UpdateTask.ps1 -Show"
+    Write-Host "  Inspect it later with:"
+    Write-Host "    pwsh -NoProfile -ExecutionPolicy Bypass -File '$PSCommandPath' -Show"
     Write-Host "  Run it now with:       Start-ScheduledTask -TaskName '$TaskName' -TaskPath '$TaskPath'"
 }
 
