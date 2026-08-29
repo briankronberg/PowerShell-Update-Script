@@ -469,7 +469,11 @@ function Read-TimedChoice {
         while ((Get-Date) -lt $deadline) {
             $remaining = [int][Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
             if ($remaining -ne $lastShown) {
-                Write-Host ("`rStarting in {0,3}s -- press 1-{1} to choose, or wait. " -f $remaining, $Choice.Count) -NoNewline
+                # [Console]::Write, not Write-Host: transcription does not see a
+                # raw console write, so the countdown redraws on screen without
+                # writing a line per second into the run log. A 60 second wait
+                # was putting 52 lines of countdown into a 276 line transcript.
+                [Console]::Write("`rStarting in {0,3}s -- press 1-{1} to choose, or wait. " -f $remaining, $Choice.Count)
                 $lastShown = $remaining
             }
 
@@ -477,7 +481,7 @@ function Read-TimedChoice {
                 $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
                 $picked = [int] $key.Character - [int] [char] '1'
                 if ($picked -ge 0 -and $picked -lt $Choice.Count) {
-                    Write-Host ''
+                    [Console]::Write("`r" + (' ' * 60) + "`r")
                     Write-Host ("Chose: {0}" -f $Choice[$picked]) -ForegroundColor Cyan
                     return $picked
                 }
@@ -493,7 +497,7 @@ function Read-TimedChoice {
         return $DefaultIndex
     }
 
-    Write-Host ''
+    [Console]::Write("`r" + (' ' * 60) + "`r")
     Write-Host ("No answer in ${TimeoutSeconds}s; taking the default: {0}" -f $Choice[$DefaultIndex]) -ForegroundColor DarkGray
     return $DefaultIndex
 }

@@ -77,6 +77,32 @@ Describe 'Read-TimedChoice' -Tag 'Unit','Prompt' {
     }
 }
 
+Describe 'The countdown stays out of the run log' -Tag 'Static','Prompt' {
+
+    BeforeAll {
+        $script:Source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1') -Raw
+        $script:Timed = [regex]::Match($script:Source, '(?s)function Read-TimedChoice.*?\n\}').Value
+    }
+
+    # Start-Transcript records Write-Host but not a raw console write. Redrawing
+    # the countdown with Write-Host put one line per second into the log -- 52 of
+    # them in a 276 line transcript on a 60 second prompt.
+    It 'redraws the countdown with a raw console write' {
+        $script:Timed | Should-MatchString '\[Console\]::Write\("`rStarting in'
+    }
+
+    It 'does not redraw it with Write-Host' {
+        $countdownWrites = [regex]::Matches($script:Timed, 'Write-Host[^\r\n]*Starting in')
+        $countdownWrites.Count | Should-Be 0
+    }
+
+    # The outcome is deliberately Write-Host: which way the run went belongs in
+    # the log, unlike the seconds ticking down to it.
+    It 'still records the decision in the log' {
+        $script:Timed | Should-MatchString 'Write-Host \("No answer in'
+    }
+}
+
 Describe 'Resolve-WindowStyle' -Tag 'Unit','Prompt' {
 
     It 'leaves <_> alone when nothing is being asked' -ForEach @('Normal', 'Minimized', 'Hidden') {
