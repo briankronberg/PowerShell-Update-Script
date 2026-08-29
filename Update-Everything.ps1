@@ -1156,7 +1156,7 @@ Invoke-Step -Name 'winget self-update' -RequiresCommand 'winget' -Action {
     # quietly miss packages rather than fail loudly, so this is not just hygiene.
     winget source update --disable-interactivity
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "winget source update returned $LASTEXITCODE; continuing (a stale index is not fatal)."
+        Write-Output "winget source update returned $LASTEXITCODE; continuing (a stale index is not fatal)."
         $global:LASTEXITCODE = 0
     }
 
@@ -1165,7 +1165,7 @@ Invoke-Step -Name 'winget self-update' -RequiresCommand 'winget' -Action {
     winget upgrade --id Microsoft.AppInstaller --exact --source winget --silent `
         --accept-source-agreements --accept-package-agreements --disable-interactivity
     if ($WingetNothingToDo -contains $LASTEXITCODE) {
-        Write-Host 'App Installer (winget) is already at the latest version.'
+        Write-Output 'App Installer (winget) is already at the latest version.'
         $global:LASTEXITCODE = 0
     }
 }
@@ -1183,7 +1183,7 @@ Invoke-Step -Name 'winget (all sources)' -RequiresCommand 'winget' -Action {
     if ($code -ne 0 -and $WingetNothingToDo -notcontains $code) {
         Write-Error ('winget upgrade --all returned {0} (0x{0:X8}); one or more packages may not have upgraded.' -f $code)
     } elseif ($code -ne 0) {
-        Write-Host 'winget reports nothing left to upgrade.'
+        Write-Output 'winget reports nothing left to upgrade.'
     }
 }
 
@@ -1204,7 +1204,7 @@ if ($IncludePowerShell7) {
 
         # Second opinion: the MSI drops pwsh.exe here whatever winget believes.
         if (-not $isInstalled -and (Test-Path -LiteralPath $exe)) {
-            Write-Host 'winget does not list PowerShell 7, but pwsh.exe is present; treating as installed.'
+            Write-Output 'winget does not list PowerShell 7, but pwsh.exe is present; treating as installed.'
             $isInstalled = $true
         }
 
@@ -1214,18 +1214,18 @@ if ($IncludePowerShell7) {
                 Stop-StepAsSkipped -Reason 'installing PowerShell 7 was not approved'
             }
 
-            Write-Host 'PowerShell 7 not detected; installing the MSI package via winget...'
+            Write-Output 'PowerShell 7 not detected; installing the MSI package via winget...'
             # --installer-type wix forces the MSI (winget 7.6+ defaults to MSIX) so it
             # installs to C:\Program Files\PowerShell\7 where Terminal expects it.
             winget install --id $id --exact --source winget --installer-type wix `
                 --accept-source-agreements --accept-package-agreements --disable-interactivity
             if ($LASTEXITCODE -ne 0) { throw "winget install returned $LASTEXITCODE" }
         } else {
-            Write-Host 'PowerShell 7 present; checking for an upgrade...'
+            Write-Output 'PowerShell 7 present; checking for an upgrade...'
             winget upgrade --id $id --exact --include-unknown `
                 --accept-source-agreements --accept-package-agreements --disable-interactivity
             if ($WingetNothingToDo -contains $LASTEXITCODE) {
-                Write-Host 'PowerShell 7 is already at the latest version.'
+                Write-Output 'PowerShell 7 is already at the latest version.'
                 $global:LASTEXITCODE = 0
             } elseif ($LASTEXITCODE -ne 0) {
                 throw "winget upgrade returned $LASTEXITCODE"
@@ -1235,9 +1235,9 @@ if ($IncludePowerShell7) {
         if (Test-Path -LiteralPath $exe) {
             $reported = & $exe -NoProfile -Command '$PSVersionTable.PSVersion.ToString()'
             if ($LASTEXITCODE -ne 0) { $global:LASTEXITCODE = 0 }
-            Write-Host "Installed pwsh version: $reported"
+            Write-Output "Installed pwsh version: $reported"
         } else {
-            Write-Host "Note: $exe not found after the winget step (an MSIX install lands elsewhere)."
+            Write-Output "Note: $exe not found after the winget step (an MSIX install lands elsewhere)."
         }
     }
 } else {
@@ -1259,7 +1259,7 @@ Invoke-Step -Name 'Microsoft 365 Apps' -Action {
     $c2r = if ($found.Count) { $found[0] } else { $null }
 
     if (-not $c2r) {
-        Write-Host 'OfficeC2RClient.exe not found; no click-to-run Office install. Skipping.'
+        Write-Output 'OfficeC2RClient.exe not found; no click-to-run Office install. Skipping.'
         return
     }
 
@@ -1268,10 +1268,10 @@ Invoke-Step -Name 'Microsoft 365 Apps' -Action {
     # means "update requested", not "update applied".
     & $c2r /update user updatepromptuser=false displaylevel=false
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "OfficeC2RClient returned $LASTEXITCODE; the update request may not have been accepted."
+        Write-Output "OfficeC2RClient returned $LASTEXITCODE; the update request may not have been accepted."
         $global:LASTEXITCODE = 0
     }
-    Write-Host "Requested a Microsoft 365 Apps update via $c2r (applied in the background)."
+    Write-Output "Requested a Microsoft 365 Apps update via $c2r (applied in the background)."
 }
 
 # ---------------------------------------------------------------------------
@@ -1345,7 +1345,7 @@ Invoke-Step -Name 'PowerShell modules' -Action {
         if ($IncludePrerelease) { $p.AllowPrerelease = $true }
         Update-Module @p
     } else {
-        Write-Host 'No PowerShellGet/PSResourceGet available; skipping.'
+        Write-Output 'No PowerShellGet/PSResourceGet available; skipping.'
     }
 }
 
@@ -1369,7 +1369,7 @@ Invoke-Step -Name 'PowerShell help' -Action {
 Invoke-Step -Name 'Python (Install Manager)' -Action {
     if     (Get-Command pymanager -ErrorAction SilentlyContinue) { pymanager install --update }
     elseif (Get-Command py        -ErrorAction SilentlyContinue) { py install --update }
-    else   { Write-Host 'Python Install Manager not found; skipping.' }
+    else   { Write-Output 'Python Install Manager not found; skipping.' }
 }
 
 Invoke-Step -Name 'uv' -RequiresCommand 'uv' -Action {
@@ -1377,7 +1377,7 @@ Invoke-Step -Name 'uv' -RequiresCommand 'uv' -Action {
     # uv installed by a package manager refuses to self-update, which is correct
     # behaviour rather than a run failure.
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "uv self update returned $LASTEXITCODE (expected when uv was installed via a package manager)."
+        Write-Output "uv self update returned $LASTEXITCODE (expected when uv was installed via a package manager)."
         $global:LASTEXITCODE = 0
     }
 }
@@ -1421,7 +1421,7 @@ Invoke-Step -Name 'npm' -RequiresCommand 'npm' -Action {
             $global:LASTEXITCODE = 0
         }
     } else {
-        Write-Host 'Skipping global package upgrade (use -UpdateGlobalNpm to enable).'
+        Write-Output 'Skipping global package upgrade (use -UpdateGlobalNpm to enable).'
     }
 }
 
@@ -1439,17 +1439,17 @@ Invoke-Step -Name '.NET global tools' -RequiresCommand 'dotnet' -Action {
     # Evaluate the match on its own: with a short-circuited -or, $Matches could
     # still be holding results from an earlier, unrelated match.
     if (-not $verOk) {
-        Write-Host "'dotnet --version' failed ('$verRaw'); no usable SDK, skipping global tools."
+        Write-Output "'dotnet --version' failed ('$verRaw'); no usable SDK, skipping global tools."
         return
     }
     if ($verRaw -notmatch '^(\d+)\.') {
-        Write-Host "Could not parse an SDK version from '$verRaw'; skipping global tools."
+        Write-Output "Could not parse an SDK version from '$verRaw'; skipping global tools."
         return
     }
 
     $major = [int]$Matches[1]
     if ($major -lt 6) {
-        Write-Host ".NET global tool update skipped (SDK $verRaw; requires 6 or higher)."
+        Write-Output ".NET global tool update skipped (SDK $verRaw; requires 6 or higher)."
         return
     }
 
@@ -1458,7 +1458,7 @@ Invoke-Step -Name '.NET global tools' -RequiresCommand 'dotnet' -Action {
         # '--all' is not accepted by every SDK that reports 6+. Fall back to
         # enumerating the installed tools and updating them one at a time.
         $global:LASTEXITCODE = 0
-        Write-Host "'dotnet tool update --all' was rejected; updating tools individually."
+        Write-Output "'dotnet tool update --all' was rejected; updating tools individually."
 
         $tools = @(dotnet tool list --global |
             Select-Object -Skip 2 |
@@ -1467,7 +1467,7 @@ Invoke-Step -Name '.NET global tools' -RequiresCommand 'dotnet' -Action {
         $global:LASTEXITCODE = 0
 
         if (-not $tools) {
-            Write-Host 'No global .NET tools installed.'
+            Write-Output 'No global .NET tools installed.'
             return
         }
         foreach ($tool in $tools) {
@@ -1485,7 +1485,7 @@ Invoke-Step -Name '.NET workloads' -RequiresCommand 'dotnet' -Action {
     # runtime-only install has no workload command at all.
     dotnet workload update
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "dotnet workload update returned $LASTEXITCODE (no SDK, or no workloads to update)."
+        Write-Output "dotnet workload update returned $LASTEXITCODE (no SDK, or no workloads to update)."
         $global:LASTEXITCODE = 0
     }
 }
@@ -1508,7 +1508,7 @@ Invoke-Step -Name 'Scoop' -RequiresCommand 'scoop' -Action {
         @{ Label = 'scoop cleanup * (old versions)';        Args = @('cleanup', '*') }
     )
     foreach ($phase in $phases) {
-        Write-Host "-> $($phase.Label)"
+        Write-Output "-> $($phase.Label)"
         $phaseArgs = $phase.Args
         & scoop @phaseArgs
         if ($LASTEXITCODE -ne 0) {
@@ -1528,7 +1528,7 @@ Invoke-Step -Name 'GitHub CLI extensions' -RequiresCommand 'gh' -Action {
     $installed = (gh extension list 2>&1 | Out-String).Trim()
     $global:LASTEXITCODE = 0
     if (-not $installed) {
-        Write-Host 'No gh extensions installed; nothing to upgrade.'
+        Write-Output 'No gh extensions installed; nothing to upgrade.'
         return
     }
     gh extension upgrade --all
@@ -1543,14 +1543,14 @@ Invoke-Step -Name 'WSL kernel' -RequiresCommand 'wsl' -Action {
     wsl --status
     if ($LASTEXITCODE -ne 0) {
         $global:LASTEXITCODE = 0
-        Write-Host 'wsl.exe is present but WSL is not installed or enabled; skipping.'
+        Write-Output 'wsl.exe is present but WSL is not installed or enabled; skipping.'
         return
     }
     $global:LASTEXITCODE = 0
 
     wsl --update
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "wsl --update returned $LASTEXITCODE (commonly 'no updates available')."
+        Write-Output "wsl --update returned $LASTEXITCODE (commonly 'no updates available')."
         $global:LASTEXITCODE = 0
     }
 }
@@ -1565,11 +1565,11 @@ Invoke-Step -Name 'Defender signatures' -RequiresCommand 'Update-MpSignature' -R
     try {
         $mp = Get-MpComputerStatus -ErrorAction Stop
     } catch {
-        Write-Host "Defender status unavailable ($($_.Exception.Message)); skipping signature update."
+        Write-Output "Defender status unavailable ($($_.Exception.Message)); skipping signature update."
         return
     }
     if (-not $mp.AMServiceEnabled) {
-        Write-Host 'Defender antimalware service is disabled (third-party AV in use?); skipping.'
+        Write-Output 'Defender antimalware service is disabled (third-party AV in use?); skipping.'
         return
     }
 
@@ -1624,7 +1624,7 @@ if ($IncludeWindowsUpdate) {
             } else {
                 Add-WUServiceManager -ServiceID $muServiceId -AddServiceFlag 7 -Confirm:$false -ErrorAction Stop | Out-Null
                 $useMicrosoftUpdate = $true
-                Write-Host 'Registered the Microsoft Update service.'
+                Write-Output 'Registered the Microsoft Update service.'
             }
         } catch {
             Write-Warning "Could not enable the Microsoft Update service ($($_.Exception.Message)); scanning Windows Update only."

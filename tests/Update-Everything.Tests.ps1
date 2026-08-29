@@ -280,6 +280,30 @@ Describe 'Update-Everything.ps1' -Tag 'Static' {
     # output for a run in which nothing went wrong.
     Context 'Transcript noise' {
 
+        # Inside a step every stream is merged with *>&1, so a Write-Host line is
+        # transcribed twice: once when it is written, and again when the merged
+        # record is rendered as the step's output. Write-Output appears once.
+        # Framework messages outside step actions are not captured that way and
+        # keep their colours.
+        It 'uses Write-Output inside step actions, not Write-Host' {
+            $offenders = foreach ($call in $script:Ast.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.CommandAst] -and
+                        $node.GetCommandName() -eq 'Invoke-Step'
+                    }, $true)) {
+
+                foreach ($write in $call.FindAll({
+                            param($node)
+                            $node -is [System.Management.Automation.Language.CommandAst] -and
+                            $node.GetCommandName() -eq 'Write-Host'
+                        }, $true)) {
+                    "line $($write.Extent.StartLineNumber): $($write.Extent.Text)"
+                }
+            }
+
+            $offenders | Should-BeNull -Because "these are logged twice in the transcript:`n$($offenders -join "`n")"
+        }
+
         It 'does not halt a pipeline inside a step action' {
             $stepBodies = $script:Ast.FindAll({
                     param($node)
