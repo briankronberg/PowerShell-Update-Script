@@ -59,6 +59,9 @@ installed, substitute `powershell` in any command below.
 | `-IncludePrerelease` | off | Include prerelease builds where supported (currently PowerShell module updates). |
 | `-UpdateGlobalNpm` | off | Upgrade global npm packages as well as npm itself. Off by default because global upgrades occasionally break pinned toolchains. |
 | `-SkipElevation` | off | Never relaunch elevated. Steps that need admin are reported as skipped with that reason. |
+| `-PromptBeforeRun` | off | Pause before starting and offer: run now, skip this run, or wait and then run. Takes the default after `-PromptTimeoutSeconds`. |
+| `-PromptTimeoutSeconds` | `60` | How long that prompt waits before starting anyway. |
+| `-DelayMinutes` | `60` | How long the "wait, then run" answer waits. |
 | `-Notify` | off | Show Windows toast notifications when the run finishes, plus an urgent one if a restart is needed. Meant for scheduled runs. |
 | `-AllowInstall` | *(none)* | Which missing components may be **installed** this run: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`. See below. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
@@ -130,6 +133,67 @@ Many CLIs write ordinary progress to stderr, so a step is only marked `Warning`
 when PowerShell itself raised an error record — that design note, and the rest of
 the reasoning behind the script's shape, is in the comment-based help at the top
 of the file.
+
+## Being interrupted by your own maintenance
+
+A scheduled run can land while you are in the middle of something. With
+`-PromptBeforeRun` it asks first:
+
+```
+A maintenance run is about to start.
+  [1]* Run now
+  [2]  Skip this run (the next scheduled run is unaffected)
+  [3]  Wait 60 minutes, then run
+
+Starting in  47s -- press 1-3 to choose, or wait.
+```
+
+- **Run now** — the default, taken automatically if nobody answers.
+- **Skip** — nothing is changed and the script exits 0. Skipping is a decision,
+  not a failure, so it stays out of the exit code. The next scheduled run is
+  untouched.
+- **Wait** — sleeps `-DelayMinutes` (default 60) and then runs.
+
+Silence means *run*, deliberately. An unanswered prompt usually means the machine
+is unattended, which is exactly when you want the updates to happen. And the
+prompt always ends: `$Host.UI.PromptForChoice` has no timeout, so this is a
+custom timed prompt — a scheduled run blocked on a question nobody is there to
+answer would otherwise sit until the task's two-hour limit killed it.
+
+If the run genuinely cannot prompt — no console, or input redirected — it says
+so and starts immediately rather than blocking.
+
+### Quiet runs
+
+The scheduled task can start minimized or hidden:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Register-UpdateTask.ps1 -WindowStyle Minimized
+```
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Register-UpdateTask.ps1 -WindowStyle Hidden
+```
+
+`Hidden` still flashes a window briefly as the process starts — a Windows
+behaviour the script cannot suppress. `Minimized` is the quieter honest option:
+out of the way, still in the taskbar, and you can watch it if you want.
+
+**The two settings do not combine.** A window you cannot see cannot ask you
+anything, so `-PromptBeforeRun` forces `Normal` and tells you it did:
+
+```
+WARNING: -PromptBeforeRun needs a visible window, so -WindowStyle Hidden is
+being ignored and the task will run Normal.
+```
+
+Otherwise the prompt would appear somewhere nobody looks, and the run would
+still wait out its timeout before starting — all of the delay, none of the
+choice. Pick one: silent runs, or runs you can interrupt.
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\Register-UpdateTask.ps1 -PromptBeforeRun
+```
 
 ## Installing versus updating
 

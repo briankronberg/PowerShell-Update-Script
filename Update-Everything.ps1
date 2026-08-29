@@ -103,6 +103,23 @@
     A scheduled task cannot prompt, so pass the approvals it should have:
         -AllowInstall PSWindowsUpdate,BurntToast
 
+.PARAMETER PromptBeforeRun
+    Pause before doing anything and offer a way out: run now, skip this run, or
+    wait -DelayMinutes and then run. Intended for a scheduled run that may land
+    while you are in the middle of something.
+
+    The prompt takes the default (run now) after -PromptTimeoutSeconds, so an
+    unattended machine is never left waiting on an answer nobody is there to
+    give. If the run cannot prompt at all -- a hidden window, redirected input --
+    it says so and starts immediately rather than blocking.
+
+.PARAMETER PromptTimeoutSeconds
+    How long the -PromptBeforeRun prompt waits before starting the run anyway.
+    Default: 60.
+
+.PARAMETER DelayMinutes
+    How long the "wait, then run" answer waits. Default: 60.
+
 .PARAMETER Notify
     Show Windows toast notifications when the run finishes: a summary, and a
     separate urgent notification when a restart is required. Off by default,
@@ -124,7 +141,8 @@
 
 .OUTPUTS
     Exit code:
-      0     every step succeeded or was skipped
+      0     every step succeeded or was skipped, or you skipped the run at the
+            -PromptBeforeRun prompt
       1-63  that many steps failed ('Warning' steps completed and do not count)
       64    nothing was attempted, because the run could not become
             Administrator -- the account is not in the local Administrators
@@ -152,6 +170,11 @@ param(
     [switch] $IncludePrerelease,
     [switch] $UpdateGlobalNpm,
     [switch] $SkipElevation,
+    [switch] $PromptBeforeRun,
+    [ValidateRange(5, 3600)]
+    [int]    $PromptTimeoutSeconds    = 60,
+    [ValidateRange(1, 1440)]
+    [int]    $DelayMinutes            = 60,
     [switch] $Notify,
     [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast')]
     [string[]] $AllowInstall = @(),
@@ -413,6 +436,91 @@ function Test-BurntToastSupportsUrgent {
         return (Get-Command New-BurntToastNotification -ErrorAction Stop).Parameters.ContainsKey('Urgent')
     } catch {
         return $false
+    }
+}
+
+function Read-TimedChoice {
+    # A choice prompt that gives up and takes the default after a while.
+    #
+    # $Host.UI.PromptForChoice has no timeout, and a scheduled run blocked on a
+    # question nobody is there to answer would sit until the task's execution
+    # time limit killed it -- turning "ask politely" into "never update again".
+    [CmdletBinding()]
+    [OutputType([int])]
+    param(
+        [Parameter(Mandatory)][string]   $Caption,
+        [Parameter(Mandatory)][string[]] $Choice,
+        [Parameter(Mandatory)][int]      $TimeoutSeconds,
+        [int] $DefaultIndex = 0
+    )
+
+    Write-Host ''
+    Write-Host $Caption -ForegroundColor Cyan
+    for ($i = 0; $i -lt $Choice.Count; $i++) {
+        $marker = if ($i -eq $DefaultIndex) { '*' } else { ' ' }
+        Write-Host ("  [{0}]{1} {2}" -f ($i + 1), $marker, $Choice[$i])
+    }
+    Write-Host ''
+
+    $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
+    $lastShown = -1
+
+    try {
+        while ((Get-Date) -lt $deadline) {
+            $remaining = [int][Math]::Ceiling(($deadline - (Get-Date)).TotalSeconds)
+            if ($remaining -ne $lastShown) {
+                Write-Host ("`rStarting in {0,3}s -- press 1-{1} to choose, or wait. " -f $remaining, $Choice.Count) -NoNewline
+                $lastShown = $remaining
+            }
+
+            if ($Host.UI.RawUI.KeyAvailable) {
+                $key = $Host.UI.RawUI.ReadKey('NoEcho,IncludeKeyDown')
+                $picked = [int] $key.Character - [int] [char] '1'
+                if ($picked -ge 0 -and $picked -lt $Choice.Count) {
+                    Write-Host ''
+                    Write-Host ("Chose: {0}" -f $Choice[$picked]) -ForegroundColor Cyan
+                    return $picked
+                }
+            }
+
+            Start-Sleep -Milliseconds 150
+        }
+    } catch {
+        # A host with no readable keyboard throws rather than returning. Taking
+        # the default is the safe answer: the run proceeds.
+        Write-Host ''
+        Write-Warning "Could not read a keypress ($($_.Exception.Message)); taking the default."
+        return $DefaultIndex
+    }
+
+    Write-Host ''
+    Write-Host ("No answer in ${TimeoutSeconds}s; taking the default: {0}" -f $Choice[$DefaultIndex]) -ForegroundColor DarkGray
+    return $DefaultIndex
+}
+
+function Request-RunDecision {
+    # Offers the operator a way out before a scheduled run starts working.
+    # Returns 'Run', 'Skip' or 'Delay'.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [int] $TimeoutSeconds = 60,
+        [int] $DelayMinutes = 60
+    )
+
+    $choices = @(
+        'Run now'
+        'Skip this run (the next scheduled run is unaffected)'
+        "Wait ${DelayMinutes} minutes, then run"
+    )
+
+    $index = Read-TimedChoice -Caption 'A maintenance run is about to start.' `
+        -Choice $choices -TimeoutSeconds $TimeoutSeconds -DefaultIndex 0
+
+    switch ($index) {
+        1       { 'Skip' }
+        2       { 'Delay' }
+        default { 'Run' }
     }
 }
 
@@ -986,6 +1094,32 @@ try {
 # transcript, where someone looking for "why did I not get a toast" will find it.
 # It also means -InstallNotificationModule installs before the run rather than
 # after everything it was meant to report on.
+# Offer a way out before anything is touched. This sits after the transcript
+# starts, so the decision is on record, and before the notification and install
+# checks, so skipping costs nothing.
+if ($PromptBeforeRun) {
+    if (-not (Test-CanPrompt)) {
+        # A hidden window or redirected input cannot answer. Starting anyway
+        # beats blocking until the task's time limit kills the run.
+        Write-Warning 'PromptBeforeRun was requested, but this run cannot prompt (no interactive console, or input is redirected). Starting immediately.'
+    } else {
+        switch (Request-RunDecision -TimeoutSeconds $PromptTimeoutSeconds -DelayMinutes $DelayMinutes) {
+            'Skip' {
+                Write-Host 'Skipped at your request. Nothing was changed.' -ForegroundColor Yellow
+                if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { } }
+                try { [Console]::OutputEncoding = $originalOutputEncoding } catch { }
+                # Not a failure: you decided, and the next scheduled run stands.
+                exit 0
+            }
+            'Delay' {
+                Write-Host "Waiting ${DelayMinutes} minute(s) before starting. Close this window to cancel." -ForegroundColor Yellow
+                Start-Sleep -Seconds ($DelayMinutes * 60)
+                Write-Host 'Resuming.' -ForegroundColor Green
+            }
+        }
+    }
+}
+
 # Answers to install prompts, remembered for the run so a component is asked
 # about at most once.
 $script:InstallDecision = @{}

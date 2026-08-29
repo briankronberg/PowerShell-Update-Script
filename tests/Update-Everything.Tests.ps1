@@ -30,6 +30,9 @@ BeforeDiscovery {
         @{ Name = 'SkipElevation';          TypeName = 'switch'; Type = [switch]; Default = $null }
         @{ Name = 'Notify';                 TypeName = 'switch'; Type = [switch]; Default = $null }
         @{ Name = 'AllowInstall';           TypeName = 'string[]'; Type = [string[]]; Default = '@()' }
+        @{ Name = 'PromptBeforeRun';        TypeName = 'switch'; Type = [switch]; Default = $null }
+        @{ Name = 'PromptTimeoutSeconds';   TypeName = 'int';    Type = [int];    Default = '60' }
+        @{ Name = 'DelayMinutes';           TypeName = 'int';    Type = [int];    Default = '60' }
         @{ Name = 'LogRetentionDays';       TypeName = 'int';    Type = [int];    Default = '30' }
     )
 
@@ -39,7 +42,7 @@ BeforeDiscovery {
         'AutoReboot', 'IncludePrerelease', 'UpdateGlobalNpm', 'SkipElevation',
         # Notifications are opt-in, and pulling a module off the gallery
         # unasked would be a surprise in an unattended run.
-        'Notify'
+        'Notify', 'PromptBeforeRun'
     )
 
     # Steps that cannot possibly work unelevated. Each must carry -RequiresAdmin
@@ -60,6 +63,7 @@ BeforeDiscovery {
         'tests/Register-UpdateTask.Tests.ps1'
         'tests/Notification.Tests.ps1'
         'tests/InstallConsent.Tests.ps1'
+        'tests/RunPrompt.Tests.ps1'
     )
 }
 
@@ -180,7 +184,7 @@ Describe 'Update-Everything.ps1' -Tag 'Static' {
 
         It 'declares no parameters beyond the documented contract' {
             $declared = $script:DeclaredParameters.Name.VariablePath.UserPath
-            $declared | Should-BeCollection -Count 10 -Because 'a new parameter needs docs and a test'
+            $declared | Should-BeCollection -Count 13 -Because 'a new parameter needs docs and a test'
         }
 
         It 'bounds -LogRetentionDays with ValidateRange' {

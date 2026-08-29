@@ -63,6 +63,29 @@
     Pass -Notify to the script so it raises toast notifications. Default: $true,
     since an unattended run is exactly the case notifications exist for.
 
+.PARAMETER WindowStyle
+    How the run's console window appears: Normal (default), Minimized, or
+    Hidden.
+
+    Hidden still flashes a window briefly as the process starts -- that is a
+    Windows behaviour, not something the script can suppress. Minimized is the
+    quieter honest option: the run is out of the way but visible in the taskbar,
+    and you can watch it if you want to.
+
+    Ignored when -PromptBeforeRun is set, because a window you cannot see cannot
+    ask you anything. See that parameter.
+
+.PARAMETER PromptBeforeRun
+    Have the run pause and offer to run now, skip, or wait an hour, instead of
+    starting the moment the trigger fires.
+
+    This forces -WindowStyle Normal. A hidden or minimized window cannot present
+    a prompt anyone would notice, so the run that asks is always a run you can
+    see. If you want silent runs, do not enable this.
+
+.PARAMETER PromptTimeoutSeconds
+    How long that prompt waits before starting the run anyway. Default: 60.
+
 .PARAMETER AllowInstall
     Approvals to pass through to Update-Everything.ps1 for first-time installs.
     A scheduled run cannot prompt, so anything not approved here is declined and
@@ -140,6 +163,14 @@ param(
     [string] $ScriptPath,
 
     [bool] $Notify = $true,
+
+    [ValidateSet('Normal', 'Minimized', 'Hidden')]
+    [string] $WindowStyle = 'Normal',
+
+    [switch] $PromptBeforeRun,
+
+    [ValidateRange(5, 3600)]
+    [int] $PromptTimeoutSeconds = 60,
 
     [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast')]
     [string[]] $AllowInstall = @(),
@@ -326,6 +357,28 @@ function New-UpdateTaskSettingsSet {
     New-ScheduledTaskSettingsSet @settings
 }
 
+function Resolve-WindowStyle {
+    # A run that asks a question has to be visible to ask it. Hidden or
+    # minimized would leave the prompt somewhere nobody looks, and the run would
+    # then sit on its timeout before starting anyway -- all of the delay, none of
+    # the choice. Prompting wins; the caller is told.
+    [CmdletBinding()]
+    [OutputType([string])]
+    param(
+        [Parameter(Mandatory)][ValidateSet('Normal', 'Minimized', 'Hidden')]
+        [string] $Requested,
+
+        [switch] $PromptBeforeRun
+    )
+
+    if ($PromptBeforeRun -and $Requested -ne 'Normal') {
+        Write-Warning "-PromptBeforeRun needs a visible window, so -WindowStyle $Requested is being ignored and the task will run Normal."
+        return 'Normal'
+    }
+
+    $Requested
+}
+
 function Get-UpdateTaskArgument {
     # The command line the task runs. -File rather than -Command, since there are
     # no typed arguments to preserve here; -ExecutionPolicy Bypass because the
@@ -335,12 +388,26 @@ function Get-UpdateTaskArgument {
     param(
         [Parameter(Mandatory)][string] $ScriptPath,
         [bool] $Notify = $true,
+        [ValidateSet('Normal', 'Minimized', 'Hidden')]
+        [string] $WindowStyle = 'Normal',
+        [switch] $PromptBeforeRun,
+        [int] $PromptTimeoutSeconds = 60,
         [string[]] $AllowInstall = @(),
         [string[]] $ExtraArgument = @()
     )
 
-    $parts = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ScriptPath))
+    $parts = @('-NoProfile')
+
+    # -WindowStyle is a host argument, so it belongs to pwsh rather than to the
+    # script, and has to come before -File.
+    if ($WindowStyle -ne 'Normal') { $parts += @('-WindowStyle', $WindowStyle) }
+
+    $parts += @('-ExecutionPolicy', 'Bypass', '-File', ('"{0}"' -f $ScriptPath))
+
     if ($Notify) { $parts += '-Notify' }
+    if ($PromptBeforeRun) {
+        $parts += @('-PromptBeforeRun', '-PromptTimeoutSeconds', $PromptTimeoutSeconds)
+    }
     # A scheduled run cannot answer a prompt, so approvals have to travel with it.
     if ($AllowInstall) { $parts += @('-AllowInstall', ($AllowInstall -join ',')) }
     if ($ExtraArgument) { $parts += $ExtraArgument }
@@ -460,9 +527,13 @@ if ($existing -and -not $Force) {
     exit 0
 }
 
+$effectiveWindowStyle = Resolve-WindowStyle -Requested $WindowStyle -PromptBeforeRun:$PromptBeforeRun
+
 $action = New-ScheduledTaskAction `
     -Execute (Get-PowerShellHostPath) `
     -Argument (Get-UpdateTaskArgument -ScriptPath $ScriptPath -Notify $Notify `
+        -WindowStyle $effectiveWindowStyle -PromptBeforeRun:$PromptBeforeRun `
+        -PromptTimeoutSeconds $PromptTimeoutSeconds `
         -AllowInstall $AllowInstall -ExtraArgument $ExtraArgument) `
     -WorkingDirectory (Split-Path $ScriptPath -Parent)
 
@@ -508,6 +579,8 @@ if ($PSCmdlet.ShouldProcess($fullTaskName, "Register scheduled task ($Cadence)")
     Write-Host "Registered '$fullTaskName'." -ForegroundColor Green
     Write-Host "  Schedule : $(Get-CadenceDescription -Cadence $Cadence -DayOfWeek $DayOfWeek -At $At)"
     Write-Host "  Runs as  : $([Security.Principal.WindowsIdentity]::GetCurrent().Name), elevated, while logged on"
+    $windowNote = if ($PromptBeforeRun) { ", prompting before it starts (${PromptTimeoutSeconds}s to answer)" } else { '' }
+    Write-Host "  Window   : ${effectiveWindowStyle}${windowNote}"
     Write-Host "  Command  : $($action.Execute) $($action.Arguments)"
     Write-Host ''
     Write-Host '  The task runs only while you are logged on, so that it can show notifications.'
