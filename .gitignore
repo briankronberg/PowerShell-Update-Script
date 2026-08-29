@@ -1,3 +1,7 @@
+# Test output (NUnit XML embeds machine name, user name and paths)
+testResults.xml
+coverage.xml
+
 # Run output
 UpdateLogs/
 *.log

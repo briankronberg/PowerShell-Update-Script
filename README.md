@@ -66,18 +66,51 @@ of the file.
 
 ```
 Update-Everything.ps1           the script
+test.ps1                        test runner, used locally and by CI
 PSScriptAnalyzerSettings.psd1   lint rules (5.1 + 7.0 compatibility)
-tests/                          Pester smoke tests: parses, lints, params intact
-.github/workflows/ci.yml        runs the same checks on windows-latest
+tests/                          Pester 6 suite
+.github/workflows/ci.yml        runs test.ps1 on windows-latest
 ```
 
 ## Development
 
+Requires [Pester 6](https://pester.dev) and PSScriptAnalyzer:
+
 ```powershell
-Install-Module Pester, PSScriptAnalyzer -Scope CurrentUser
-Invoke-Pester .\tests
-Invoke-ScriptAnalyzer .\Update-Everything.ps1 -Settings .\PSScriptAnalyzerSettings.psd1
+Install-Module Pester -MinimumVersion 6.0.0 -Scope CurrentUser -Force -SkipPublisherCheck
+Install-Module PSScriptAnalyzer -Scope CurrentUser
 ```
+
+Run the suite through `test.ps1`, the same entry point CI uses, so a green run
+locally means a green run in the pipeline:
+
+```powershell
+.\test.ps1                      # everything
+.\test.ps1 -Tag Static          # script contract only
+.\test.ps1 -ExcludeTag Lint     # skip the analyzer pass
+.\test.ps1 -CI                  # non-zero exit on failure, writes testResults.xml
+```
+
+Tests are tagged `Static` (the script's parameter contract, help and step
+definitions), `Docs` (README and LICENSE stay in sync with the script) and
+`Lint` (PSScriptAnalyzer).
+
+### How the tests work, and why
+
+The suite never dot-sources or executes `Update-Everything.ps1`. Running it to
+test it would elevate, install software and potentially reboot the machine doing
+the testing. Everything is asserted statically instead — through the PowerShell
+AST, and through `Get-Command` / `Get-Help`, which read a script's parameter
+block and help without running its body.
+
+That constraint is also why there is no code coverage metric: coverage requires
+executing the code under test.
+
+What it buys you is a contract that cannot drift silently. Add a parameter and
+the suite fails until it is documented in both the comment-based help and the
+README table. Flip a default so the script reboots or upgrades without being
+asked and the suite fails. Give two steps the same name — they would overwrite
+each other's log file — and the suite fails.
 
 History note: the first three commits are the v1 → v2 → v3 revisions of the
 script as it was developed, so `git log -p Update-Everything.ps1` shows why each
