@@ -491,11 +491,20 @@
             Update-PSResource @p
         } elseif (Get-Command Update-Module -ErrorAction SilentlyContinue) {
             $p = @{
-                Force         = $true
-                AcceptLicense = $true
-                Confirm       = $false
-                ErrorAction   = 'SilentlyContinue'
+                Force       = $true
+                Confirm     = $false
+                ErrorAction = 'SilentlyContinue'
             }
+
+            # PowerShellGet 1.0.0.1 -- the version Windows PowerShell ships -- has
+            # no -AcceptLicense, and splatting a parameter that does not exist is a
+            # terminating error, so this step used to fail outright on 5.1.
+            if (Test-ParameterSupport -Command 'Update-Module' -Parameter 'AcceptLicense') {
+                $p.AcceptLicense = $true
+            } else {
+                Write-Output 'PowerShellGet on this host predates -AcceptLicense; continuing without it. A module that requires accepting a license will be skipped rather than prompt.'
+            }
+
             if ($IncludePrerelease) { $p.AllowPrerelease = $true }
             Update-Module @p
         } else {
@@ -776,8 +785,22 @@
                 }
 
                 try {
-                    Install-Module PSWindowsUpdate -Force -Scope AllUsers -AcceptLicense `
-                        -AllowClobber -Confirm:$false -ErrorAction Stop
+                    $install = @{
+                        Name         = 'PSWindowsUpdate'
+                        Force        = $true
+                        Scope        = 'AllUsers'
+                        AllowClobber = $true
+                        Confirm      = $false
+                        ErrorAction  = 'Stop'
+                    }
+
+                    # Same reason as the module-update step: the PowerShellGet
+                    # Windows ships has no -AcceptLicense to splat.
+                    if (Test-ParameterSupport -Command 'Install-Module' -Parameter 'AcceptLicense') {
+                        $install.AcceptLicense = $true
+                    }
+
+                    Install-Module @install
                 } catch {
                     throw "Failed to install PSWindowsUpdate module: $_"
                 }

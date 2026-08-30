@@ -407,6 +407,63 @@ Describe 'Write-StepLog' -Tag 'Unit' {
     }
 }
 
+Describe 'Test-ParameterSupport' -Tag 'Unit' {
+
+    # Windows PowerShell ships PowerShellGet 1.0.0.1, whose Update-Module has no
+    # -AcceptLicense. Splatting it there is a terminating error, and it failed
+    # both the "PowerShell modules" and "Windows Update" steps on a 5.1 run.
+
+    It 'reports true for a parameter the resolved command really has' {
+        Test-ParameterSupport -Command 'Get-ChildItem' -Parameter 'Recurse' |
+            Should-BeTrue
+    }
+
+    It 'reports false for a parameter the resolved command does not have' {
+        Test-ParameterSupport -Command 'Get-ChildItem' -Parameter 'AcceptLicense' |
+            Should-BeFalse
+    }
+
+    # A missing command is the ordinary case on a host without PowerShellGet, so
+    # it has to answer rather than throw.
+    It 'reports false for a command that does not exist' {
+        Test-ParameterSupport -Command 'No-SuchCommandExists' -Parameter 'Whatever' |
+            Should-BeFalse
+    }
+
+    It 'returns a real boolean rather than a truthy object' {
+        Test-ParameterSupport -Command 'Get-ChildItem' -Parameter 'Recurse' |
+            Should-HaveType ([bool])
+    }
+}
+
+Describe 'The gallery steps never splat a parameter blindly' -Tag 'Static' {
+
+    # The regression these guard is subtle: -AcceptLicense is correct on
+    # PSResourceGet and on PowerShellGet v2, so it looks right everywhere until
+    # it runs on the version Windows actually ships.
+
+    BeforeAll {
+        $script:MainSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    It 'guards the Update-Module call' {
+        $script:MainSource |
+            Should-MatchString "Test-ParameterSupport -Command 'Update-Module' -Parameter 'AcceptLicense'"
+    }
+
+    It 'guards the Install-Module call' {
+        $script:MainSource |
+            Should-MatchString "Test-ParameterSupport -Command 'Install-Module' -Parameter 'AcceptLicense'"
+    }
+
+    # Update-PSResource is a different command with a different history, and it
+    # has always had the parameter, so it needs no guard.
+    It 'leaves the PSResourceGet branch alone' {
+        $script:MainSource | Should-MatchString 'Update-PSResource @p'
+    }
+}
+
 Describe 'Test-UacEnabled' -Tag 'Unit','Security' {
 
     It 'reports enabled when EnableLUA is 1' {
