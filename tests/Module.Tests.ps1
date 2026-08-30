@@ -762,6 +762,34 @@ Describe 'The summary is displayed, not returned' -Tag 'Static','Module' {
     }
 }
 
+Describe 'Step output is displayed, not returned' -Tag 'Static','Module' {
+
+    # Same defect as the summary table above, in the other half of the run.
+    # Inside a function, unassigned pipeline output is the return value, so every
+    # line a step produced was returned to the caller instead of displayed:
+    # `$result = Update-Everything` -- the form the README documents -- came back
+    # with 63 objects and the result buried among them, and the transcript
+    # recorded none of the run it exists to record.
+
+    It 'sends the captured step output to the host' {
+        $path = Join-Path $script:ModuleRoot 'Private\Invoke-Step.ps1'
+        $ast  = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref] $null, [ref] $null)
+
+        # The pipeline that runs the action, found by the action invocation
+        # inside it rather than by line number.
+        $pipeline = $ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.PipelineAst] -and
+                $node.Extent.Text -match '\$Action \*>&1'
+            }, $true) | Select-Object -First 1
+
+        $pipeline | Should-NotBeNull -Because 'the step action pipeline should still exist'
+
+        $last = $pipeline.PipelineElements[-1]
+        $last.GetCommandName() | Should-Be 'Out-Host'
+    }
+}
+
 Describe 'No step updates through a tool it has not verified' -Tag 'Static','Module' {
 
     # The rule: a step must not invoke a package manager it has not confirmed is

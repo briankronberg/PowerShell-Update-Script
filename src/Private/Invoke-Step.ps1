@@ -56,11 +56,20 @@
         # line as interleaved nulls. Out-String also renders the Format* records
         # a table arrives as into the table itself, which writing the objects one
         # at a time would not.
+        # Out-Host on the end, for the same reason the summary table has one.
+        # Inside a function, unassigned pipeline output is the return value, so
+        # every line a step produced was being returned to the caller rather than
+        # displayed. $result = Update-Everything -- the form the README documents
+        # -- therefore captured 63 objects with the result buried among them, and
+        # the transcript recorded none of the run it was supposed to be a record
+        # of. Sending it to the host displays it live, the transcript picks it up
+        # from there, and only the result object comes back.
         $stepOutput = [System.Collections.Generic.List[object]]::new()
         & $Action *>&1 |
             ForEach-Object { $stepOutput.Add($_); $_ } |
             Out-String -Stream |
-            ForEach-Object { Write-StepLog -Path $stepLog -Raw $_; $_ }
+            ForEach-Object { Write-StepLog -Path $stepLog -Raw $_; $_ } |
+            Out-Host
 
         $code = $LASTEXITCODE
         if ($null -ne $code -and $code -ne 0) {
