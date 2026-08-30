@@ -346,8 +346,10 @@ src/UpdateEverything.psm1     loader, dot-sources Public and Private
 src/Public/                   the five exported functions, one per file
 src/Private/                  internal helpers, one per file
 Install.ps1                   installs the module from a clone
+Publish.ps1                   validates and publishes to the PowerShell Gallery
 test.ps1                      test runner, used locally and by CI
 tests/                        Pester 6 suite
+CONTRIBUTING.md               the rules, and how the tests have lied before
 .github/workflows/ci.yml      runs test.ps1 on windows-latest
 ```
 
@@ -356,6 +358,10 @@ keeps its module under `src` with `Public` and `Private` folders and a loader
 that dot-sources both and exports only the public names.
 
 ## Development
+
+[CONTRIBUTING.md](CONTRIBUTING.md) has the rules a change is expected to follow,
+why each one exists, and a catalogue of the ways this suite has been green over
+broken code. Read it before writing a test.
 
 Requires [Pester 6](https://pester.dev) and PSScriptAnalyzer:
 

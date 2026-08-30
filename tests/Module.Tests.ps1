@@ -228,6 +228,50 @@ Describe 'Module source layout' -Tag 'Static','Module' {
 
         $offenders | Should-BeNull -Because "these would end the caller's session:`n$($offenders -join "`n")"
     }
+
+    # Assigning $ErrorActionPreference inside a module changes the preference of
+    # whoever imported it, and converts every later non-terminating error in that
+    # scope whether or not that was wanted. The per-call -ErrorAction Stop next to
+    # the try/catch is the version that only affects the call it is on.
+    # Install.ps1, Publish.ps1 and test.ps1 do set it. They own their session.
+    It 'never assigns $ErrorActionPreference, which belongs to the caller' {
+        $offenders = foreach ($file in Get-ChildItem (Join-Path $script:ModuleRoot 'Public'), (Join-Path $script:ModuleRoot 'Private') -Filter *.ps1) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref] $null, [ref] $null)
+            foreach ($assignment in $ast.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                        $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                        $node.Left.VariablePath.UserPath -match '^(global:|script:)?ErrorActionPreference$'
+                    }, $true)) {
+                "$($file.Name):$($assignment.Extent.StartLineNumber)"
+            }
+        }
+
+        $offenders | Should-BeNull -Because "these change the importing session's preference:`n$($offenders -join "`n")"
+    }
+
+    # A catch that swallows in silence is indistinguishable from one that never
+    # ran. Six of these were hiding a failed Stop-Transcript, an encoding that
+    # would not restore, and an unreadable registry key -- on every run.
+    # Say what was ignored, so -Verbose can show it.
+    It 'never swallows an error in silence' {
+        $offenders = foreach ($file in Get-ChildItem (Join-Path $script:ModuleRoot 'Public'), (Join-Path $script:ModuleRoot 'Private') -Filter *.ps1) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref] $null, [ref] $null)
+            foreach ($try in $ast.FindAll({
+                        param($node) $node -is [System.Management.Automation.Language.TryStatementAst]
+                    }, $true)) {
+                foreach ($clause in $try.CatchClauses) {
+                    # Statements, not text: a catch holding only a comment parses
+                    # to an empty body and is just as silent as an empty one.
+                    if ($clause.Body.Statements.Count -eq 0) {
+                        "$($file.Name):$($clause.Extent.StartLineNumber)"
+                    }
+                }
+            }
+        }
+
+        $offenders | Should-BeNull -Because "these swallow an error without saying so:`n$($offenders -join "`n")"
+    }
 }
 
 Describe 'Shared run state' -Tag 'Static','Module' {
