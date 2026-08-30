@@ -67,27 +67,39 @@
     # manifest named after it, which a versioned path like \1.0.0 never has.
     $manifest = Join-Path $script:ModuleRoot 'UpdateEverything.psd1'
     $escModule = "'" + ($manifest -replace "'", "''") + "'"
-    $invoke = "Import-Module $escModule -Force; Update-Everything"
+
+    # The call is built on its own, separately from the import. Parentheses in
+    # PowerShell hold an expression, not a statement list, so wrapping both
+    # together --
+    #
+    #     exit (Import-Module '...' -Force; Update-Everything).FailedCount
+    #
+    # -- is a parse error: "Missing closing ')' in expression". The elevated
+    # window opened, pwsh exited 1 before running a line of it, and it closed
+    # again too fast to read, leaving no transcript and no clue. Import first,
+    # then exit on the call alone, which is what Get-UpdateTaskArgument has
+    # always done for the scheduled task.
+    $call = 'Update-Everything'
 
     foreach ($entry in $BoundParameters.GetEnumerator()) {
         $key = $entry.Key
         $val = $entry.Value
 
         if ($val -is [switch]) {
-            if ($val.IsPresent) { $invoke += " -$key" }
+            if ($val.IsPresent) { $call += " -$key" }
         } elseif ($val -is [bool]) {
-            $invoke += " -${key}:`$$($val.ToString().ToLowerInvariant())"
+            $call += " -${key}:`$$($val.ToString().ToLowerInvariant())"
         } elseif ($val -is [array]) {
             $quoted = ($val | ForEach-Object { "'" + ("$_" -replace "'", "''") + "'" }) -join ','
-            $invoke += " -$key $quoted"
+            $call += " -$key $quoted"
         } else {
-            $invoke += " -$key '" + ("$val" -replace "'", "''") + "'"
+            $call += " -$key '" + ("$val" -replace "'", "''") + "'"
         }
     }
 
     # The child turns the result into an exit code, which is the only thing that
     # can cross a process boundary.
-    $invoke = "exit ($invoke).FailedCount"
+    $invoke = "Import-Module $escModule -Force; exit ($call).FailedCount"
     $argList = "-NoProfile -ExecutionPolicy Bypass -Command `"$invoke`""
 
     try {
