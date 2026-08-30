@@ -571,6 +571,49 @@ Describe 'The gallery steps never splat a parameter blindly' -Tag 'Static' {
     }
 }
 
+Describe 'Test-PackagedProcess' -Tag 'Unit','Security' {
+
+    It 'recognises the package binary under WindowsApps' {
+        Test-PackagedProcess -Path "$env:ProgramFiles\WindowsApps\Microsoft.PowerShell_7.6.5.0_x64__8wekyb3d8bbwe\pwsh.exe" |
+            Should-BeTrue
+    }
+
+    # The alias is a zero-byte reparse point, not a program. Start-Process
+    # cannot launch it and Task Scheduler cannot either.
+    It 'recognises the app execution alias' {
+        Test-PackagedProcess -Path "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe" |
+            Should-BeTrue
+    }
+
+    It 'accepts the MSI install as unpackaged' {
+        Test-PackagedProcess -Path "$env:ProgramFiles\PowerShell\7\pwsh.exe" |
+            Should-BeFalse
+    }
+
+    It 'accepts Windows PowerShell as unpackaged' {
+        Test-PackagedProcess -Path "$env:WINDIR\System32\WindowsPowerShell\v1.0\powershell.exe" |
+            Should-BeFalse
+    }
+
+    # A substring test would call this packaged. It is an ordinary folder that
+    # happens to share a name, and refusing to elevate over it would be wrong.
+    It 'does not match a folder merely named WindowsApps elsewhere' {
+        Test-PackagedProcess -Path 'D:\Backup\WindowsApps\pwsh.exe' | Should-BeFalse
+    }
+
+    It 'treats an empty path as unpackaged rather than throwing' {
+        Test-PackagedProcess -Path '' | Should-BeFalse
+    }
+
+    It 'treats a null path as unpackaged rather than throwing' {
+        Test-PackagedProcess -Path $null | Should-BeFalse
+    }
+
+    It 'returns a real boolean' {
+        Test-PackagedProcess -Path 'C:\nowhere\pwsh.exe' | Should-HaveType ([bool])
+    }
+}
+
 Describe 'Test-UacEnabled' -Tag 'Unit','Security' {
 
     It 'reports enabled when EnableLUA is 1' {
@@ -651,6 +694,10 @@ Describe 'Test-ElevationCapability' -Tag 'Unit','Security' {
             Mock Test-IsAdministrator { $false }
             Mock Test-AdministratorGroupMember { $true }
             Mock Test-UacEnabled { $true }
+            # Mocked rather than left to the real host: whether the developer's
+            # own PowerShell came from the Store decides this answer otherwise,
+            # and a test that passes or fails on that is not testing anything.
+            Mock Test-PackagedProcess { $false }
         }
 
         It 'allows elevation to be attempted' {
@@ -659,6 +706,56 @@ Describe 'Test-ElevationCapability' -Tag 'Unit','Security' {
 
         It 'does not claim the session is already elevated' {
             (Test-ElevationCapability).IsElevated | Should-BeFalse
+        }
+    }
+
+    # winget has defaulted Microsoft.PowerShell to the MSIX installer since 7.6,
+    # so this is the ordinary state of a machine that installed pwsh the obvious
+    # way. Windows does not run packaged apps elevated, and the run used to
+    # discover that by raising a UAC prompt that could not succeed and then
+    # reporting the failure as though the user had declined it.
+    Context 'An MSIX PowerShell with no MSI build installed' {
+
+        BeforeEach {
+            Mock Test-IsAdministrator { $false }
+            Mock Test-AdministratorGroupMember { $true }
+            Mock Test-UacEnabled { $true }
+            Mock Test-PackagedProcess { $true }
+            Mock Test-Path { $false } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
+        }
+
+        It 'refuses rather than raising a prompt that cannot succeed' {
+            (Test-ElevationCapability).CanElevate | Should-BeFalse
+        }
+
+        It 'names the packaged build as the reason' {
+            (Test-ElevationCapability).Reason | Should-MatchString 'MSIX'
+        }
+
+        It 'gives the command that installs a build which can elevate' {
+            (Test-ElevationCapability).Reason | Should-MatchString 'installer-type wix'
+        }
+
+        It 'still offers -SkipElevation as the way forward' {
+            (Test-ElevationCapability).Reason | Should-MatchString 'SkipElevation'
+        }
+    }
+
+    # The MSI build sits at a fixed path and can elevate, so a packaged host is
+    # only a dead end when nothing else is installed. Invoke-SelfElevation
+    # relaunches through the MSI in this case.
+    Context 'An MSIX PowerShell with the MSI build alongside it' {
+
+        BeforeEach {
+            Mock Test-IsAdministrator { $false }
+            Mock Test-AdministratorGroupMember { $true }
+            Mock Test-UacEnabled { $true }
+            Mock Test-PackagedProcess { $true }
+            Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
+        }
+
+        It 'allows elevation to be attempted' {
+            (Test-ElevationCapability).CanElevate | Should-BeTrue
         }
     }
 
@@ -673,6 +770,7 @@ Describe 'Test-ElevationCapability' -Tag 'Unit','Security' {
             Mock Test-IsAdministrator { $false }
             Mock Test-AdministratorGroupMember { $null }
             Mock Test-UacEnabled { $true }
+            Mock Test-PackagedProcess { $false }
         }
 
         It 'attempts elevation rather than refusing' {

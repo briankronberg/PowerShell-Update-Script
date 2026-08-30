@@ -408,7 +408,13 @@
                 if ($LASTEXITCODE -ne 0) { $global:LASTEXITCODE = 0 }
                 Write-Output "Installed pwsh version: $reported"
             } else {
-                Write-Output "Note: $exe not found after the winget step (an MSIX install lands elsewhere)."
+                # The install branch forces --installer-type wix, but the upgrade
+                # branch cannot convert a PowerShell that is already packaged, so
+                # say what it costs and how to switch. An MSIX pwsh works fine for
+                # everything except elevating and being named in a scheduled task,
+                # which are two things this module needs.
+                Write-Output "Note: $exe not found, so PowerShell 7 here is the MSIX package. It runs normally, but Windows will not elevate it and its path changes at every update, so scheduled tasks cannot rely on it."
+                Write-Output 'To switch: winget install --id Microsoft.PowerShell --exact --source winget --installer-type wix'
             }
         }
     } else {

@@ -223,13 +223,25 @@ Describe 'Every install site is gated' -Tag 'Static','Consent' {
     }
 
     It 'guards the winget install of PowerShell 7' {
-        # winget is a native command, so it is matched as text rather than AST.
+        # The AST, not a text search. winget is a native command but still parses
+        # as a CommandAst, and matching text instead would also hit the string
+        # literal that prints the command as advice -- which installs nothing.
+        $installs = @($script:Ast.FindAll({
+                    param($node)
+                    $node -is [System.Management.Automation.Language.CommandAst] -and
+                    $node.GetCommandName() -eq 'winget' -and
+                    @($node.CommandElements | ForEach-Object { $_.Extent.Text }) -contains 'install'
+                }, $true))
+
+        $installs | Should-NotBeNull -Because 'the PowerShell 7 install should still exist'
+
         $lines = $script:Source -split "`r?`n"
-        $index = ($lines | Select-String -Pattern 'winget install --id' -SimpleMatch:$false).LineNumber
+        $ungated = foreach ($call in $installs) {
+            $line   = $call.Extent.StartLineNumber
+            $window = ($lines[[Math]::Max(0, $line - 13)..($line - 1)]) -join "`n"
+            if ($window -notmatch 'Approve-Install') { "line ${line}: $($call.Extent.Text)" }
+        }
 
-        $index | Should-NotBeNull -Because 'the PowerShell 7 install should still exist'
-
-        $window = ($lines[[Math]::Max(0, $index - 12)..($index - 1)]) -join "`n"
-        $window | Should-MatchString 'Approve-Install'
+        $ungated | Should-BeNull -Because "these install without asking:`n$($ungated -join "`n")"
     }
 }

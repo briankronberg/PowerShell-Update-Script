@@ -30,10 +30,29 @@
     # Prefer the current host executable. Some hosts report no path, so fall back
     # to whatever PowerShell can be resolved.
     $hostPath = (Get-Process -Id $PID).Path
+
+    # ...unless this host is the MSIX package, which Windows will not run
+    # elevated. The MSI build sits alongside it and can, so prefer that over
+    # failing. Test-ElevationCapability refuses the run outright when neither is
+    # available, so reaching here with no MSI means it was called directly.
+    if (Test-PackagedProcess -Path $hostPath) {
+        $msi = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
+        if (Test-Path -LiteralPath $msi) {
+            Write-Warning 'This PowerShell is the MSIX package, which Windows will not run elevated. Relaunching with the MSI build.'
+            $hostPath = $msi
+        } else {
+            throw 'Cannot self-elevate: this PowerShell is the MSIX build (the Store and winget default), and Windows does not run packaged apps elevated. Install the MSI build with "winget install --id Microsoft.PowerShell --exact --source winget --installer-type wix", or re-run with -SkipElevation.'
+        }
+    }
+
     if (-not $hostPath -or -not (Test-Path -LiteralPath $hostPath)) {
         $hostPath = $null
         foreach ($candidate in 'pwsh', 'powershell') {
+            # A packaged candidate is no better than a packaged host, and the
+            # alias in WindowsApps is a zero-byte reparse point Start-Process
+            # cannot launch at all.
             $resolved = Get-Command $candidate -CommandType Application -ErrorAction SilentlyContinue |
+                Where-Object { -not (Test-PackagedProcess -Path $_.Source) } |
                 Select-Object -First 1
             if ($resolved) { $hostPath = $resolved.Source; break }
         }
