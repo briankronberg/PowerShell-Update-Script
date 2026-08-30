@@ -387,15 +387,59 @@ Describe 'Format-LastRunResult' -Tag 'Unit' {
 
 Describe 'Get-PowerShellHostPath' -Tag 'Unit' {
 
+    # This path is baked into a scheduled task, so it has to still exist months
+    # later. A packaged pwsh resolves to
+    # ...\WindowsApps\Microsoft.PowerShell_7.6.5.0_x64__8wekyb3d8bbwe\pwsh.exe,
+    # which carries the version and disappears at the next update, and the app
+    # execution alias beside it is a zero-byte reparse point Task Scheduler
+    # cannot launch. Neither is a thing to write into a task definition.
+
     It 'returns a path that exists' {
         Test-Path -LiteralPath (Get-PowerShellHostPath) | Should-BeTrue
     }
 
-    It 'prefers pwsh when it is installed' -Skip:(-not (Get-Command pwsh -CommandType Application -ErrorAction SilentlyContinue)) {
-        Get-PowerShellHostPath | Should-MatchString 'pwsh\.exe$'
+    It 'prefers the MSI install, whose path does not move' {
+        Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
+
+        Get-PowerShellHostPath | Should-Be (Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe')
+    }
+
+    It 'prefers an unpackaged pwsh on PATH when there is no MSI install' {
+        Mock Test-Path { $false } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
+        Mock Get-Command { [pscustomobject]@{ Source = 'D:\tools\pwsh.exe' } } `
+            -ParameterFilter { $Name -eq 'pwsh' }
+
+        Get-PowerShellHostPath | Should-Be 'D:\tools\pwsh.exe'
+    }
+
+    # The regression: a task registered on an MSIX-only machine used to name a
+    # version-stamped WindowsApps path and die at the next PowerShell update.
+    # Windows PowerShell at a path that has not moved in twenty years is the
+    # better answer, and the module supports 5.1 anyway.
+    It 'skips a packaged pwsh in favour of Windows PowerShell' {
+        Mock Test-Path { $false } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
+        Mock Get-Command {
+            [pscustomobject]@{ Source = "$env:ProgramFiles\WindowsApps\Microsoft.PowerShell_7.6.5.0_x64__8wekyb3d8bbwe\pwsh.exe" }
+        } -ParameterFilter { $Name -eq 'pwsh' }
+        Mock Get-Command { [pscustomobject]@{ Source = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' } } `
+            -ParameterFilter { $Name -eq 'powershell' }
+
+        Get-PowerShellHostPath | Should-MatchString 'powershell\.exe$'
+    }
+
+    It 'never returns an app execution alias' {
+        Mock Test-Path { $false } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
+        Mock Get-Command {
+            [pscustomobject]@{ Source = "$env:LOCALAPPDATA\Microsoft\WindowsApps\pwsh.exe" }
+        } -ParameterFilter { $Name -eq 'pwsh' }
+        Mock Get-Command { [pscustomobject]@{ Source = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' } } `
+            -ParameterFilter { $Name -eq 'powershell' }
+
+        Get-PowerShellHostPath | Should-NotMatchString 'WindowsApps'
     }
 
     It 'falls back to Windows PowerShell when pwsh is absent' {
+        Mock Test-Path { $false } -ParameterFilter { $LiteralPath -like '*PowerShell\7\pwsh.exe' }
         Mock Get-Command { } -ParameterFilter { $Name -eq 'pwsh' }
         Mock Get-Command { [pscustomobject]@{ Source = 'C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe' } } `
             -ParameterFilter { $Name -eq 'powershell' }
