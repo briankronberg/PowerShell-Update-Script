@@ -150,16 +150,78 @@ thing that crosses a process boundary.
 | `-AllowInstall` | *(none)* | Which missing components may be installed: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`, `PowerShellGet`. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
 
-## Channels covered
+## What it updates
 
-Each step runs only if its tool is on the machine. The summary lists the rest as
-skipped:
+The module keeps no list of software. It drives the update tools already on the
+machine, so what gets updated is whatever those tools manage. Every step looks
+for its tool with `Get-Command` first and reports `Skipped` when it finds
+nothing. It never installs a tool just to make a step possible.
 
-winget (self-update, then all sources) · Microsoft Store apps · PowerShell 7 ·
-Microsoft 365 Apps (OfficeC2RClient) · PowerShell modules and help ·
-Python Install Manager · uv · pipx · npm · .NET global tools · .NET workloads ·
-Chocolatey · Scoop · rustup · GitHub CLI extensions · WSL kernel ·
-Defender signatures · Windows Terminal default profile · Windows Update
+So the answer comes in two halves. Some products it updates by name. For the
+rest, a package manager's own inventory decides.
+
+### Products updated by name
+
+| Product | How it updates |
+|---|---|
+| Windows itself, with drivers and the servicing stack | `Get-WindowsUpdate -AcceptAll -Install` through PSWindowsUpdate. It registers the Microsoft Update service first, which widens the scan from Windows alone to Office, Visual Studio and other Microsoft products. Needs administrator rights. |
+| Microsoft 365 Apps, meaning Word, Excel, Outlook, PowerPoint, Teams and OneNote | `OfficeC2RClient.exe /update user`, the same action as the Update Now button without the prompts. Click-to-run does the work in the background, so the step reports "requested" rather than "applied". |
+| Microsoft Store apps | The `msstore` source, covered by `winget upgrade --all`. |
+| Microsoft Defender antivirus signatures | `Update-MpSignature`. It skips when a third-party antivirus has taken over, which it detects by asking `Get-MpComputerStatus` whether the antimalware service is on. Otherwise a managed machine would report a failed step every run. |
+| PowerShell 7 | winget, forced to the MSI package with `--installer-type wix`. It installs only with your consent and upgrades in place when it is already there. |
+| PowerShell modules from the Gallery | `Update-PSResource -Name *` where PSResourceGet exists, otherwise `Update-Module`. |
+| PowerShell help | `Update-Help`, pinned to `en-US` under any other UI culture, where most modules publish no help at all. |
+| WSL, both the Linux kernel and the platform | `wsl --update`, once `wsl --status` confirms WSL is enabled. `wsl.exe` ships on every Windows 11 machine, so finding it proves nothing. |
+| winget itself, packaged as App Installer | It asks for App Installer by ID, because `upgrade --all` does not reliably update the tool running the upgrade. |
+| Windows Terminal | Not an update. It can set PowerShell 7 as the default profile, backing up `settings.json` first. |
+
+One more step shows up in every summary without updating anything. `Trust
+PSGallery` marks the PowerShell Gallery as trusted, because it ships untrusted
+and every module update otherwise stops on a confirmation prompt that
+`-ErrorAction SilentlyContinue` cannot suppress. The setting is per user and
+survives elevation, so it sticks after the first run.
+
+### Package managers it drives
+
+Whatever these manage on your machine is what they update. The module does not
+choose the packages; the manager's own inventory does.
+
+| Manager | Found by | What runs | Covers |
+|---|---|---|---|
+| winget | `winget` on `PATH` | `winget source update`, then `winget upgrade --all --include-unknown --silent` | Desktop applications from the winget community repository and the Microsoft Store. The broadest step by far, covering browsers, editors, runtimes and drivers shipped as apps. |
+| Chocolatey | `choco` | `choco upgrade all -y` | Everything installed as a Chocolatey package. Exit codes 1641 and 3010 pass, since those are the MSI "reboot required" codes rather than failures. |
+| Scoop | `scoop` | `scoop update`, `scoop update *`, `scoop cleanup *`, each run on its own | Scoop, its buckets, installed apps, then old versions. The phases run separately so a broken bucket cannot hide the rest. |
+| npm | `npm` | `npm install -g npm@latest`, then `npm update -g` only with `-UpdateGlobalNpm` | npm itself, every run. Global packages only on request, because upgrading them can move a pinned toolchain. |
+| pipx | `pipx` | `pipx upgrade-all` | Every Python application pipx installed. |
+| uv | `uv`, plus an ownership check | `uv self update` | uv itself, and only when nothing else owns it. |
+| Python Install Manager | `pymanager`, else `py` | `pymanager install --update` | Installed Python runtimes. |
+| .NET SDK | `dotnet`, plus an SDK version of 6 or higher | `dotnet tool update --all --global`, falling back to updating each tool by name | Global .NET tools. `dotnet` exists for runtime-only installs too, so the step confirms the SDK before using it. |
+| .NET workloads | `dotnet` | `dotnet workload update` | MAUI, Android, iOS and WASM workloads. |
+| rustup | `rustup` | `rustup update` | Every installed Rust toolchain. |
+| GitHub CLI | `gh`, plus a non-empty `gh extension list` | `gh extension upgrade --all` | Installed `gh` extensions. That second check matters, because the upgrade command exits non-zero when nothing is installed. |
+
+### How it decides who owns a tool
+
+Presence is not enough for anything that can update itself. Scoop has to be the
+one to update a `uv` that Scoop installed, because `uv self update` fights
+whichever manager owns it and the next `scoop update` undoes the result.
+
+`Get-ToolInstallSource` answers the ownership question from where the executable
+lives, the only signal it can get without asking every manager on the machine
+in turn:
+
+| Path contains | Owner |
+|---|---|
+| a Scoop `shims` or `apps` directory | Scoop |
+| WinGet's `Links` or `Packages` directory | WinGet |
+| the Chocolatey `bin` | Chocolatey |
+| a Python `Scripts` directory | pip or pipx |
+| `~\.local\bin` or `~\bin` | a standalone vendor installer |
+| anywhere else | Unknown |
+
+Self-update runs only for `Standalone` and `Unknown`. Anything it can pin on a
+manager, it skips, naming that manager in the reason. The summary says why
+rather than going quiet.
 
 ## Running without administrator rights
 
