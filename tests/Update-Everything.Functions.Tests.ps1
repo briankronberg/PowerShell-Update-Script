@@ -685,6 +685,32 @@ Describe 'The PowerShellGet upgrade offer' -Tag 'Static' {
     }
 }
 
+Describe 'The summary says notifications were not requested' -Tag 'Static' {
+
+    # -Notify defaults to off, so a run that does not pass it never reaches
+    # Initialize-NotificationSupport and never offers to install BurntToast.
+    # That is correct, but the run said nothing at all about it, which reads as
+    # a broken feature rather than an unrequested one, and sends people looking
+    # for a consent prompt that was never going to appear.
+
+    It 'reports the unrequested case rather than staying silent' {
+        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw |
+            Should-MatchString 'Notifications: not requested'
+    }
+
+    It 'names the switch that turns them on' {
+        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw |
+            Should-MatchString 'Notifications: not requested[^\r\n]*-Notify'
+    }
+
+    # The existing branch reports notifications that were asked for and could not
+    # be sent. This must not swallow it.
+    It 'still reports notifications that were requested but unavailable' {
+        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw |
+            Should-MatchString 'Notifications were requested but could not be sent'
+    }
+}
+
 Describe 'Test-UacEnabled' -Tag 'Unit','Security' {
 
     It 'reports enabled when EnableLUA is 1' {

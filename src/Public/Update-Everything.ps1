@@ -952,6 +952,13 @@
         Write-Host '[!] Notifications were requested but could not be sent.' -ForegroundColor Yellow
         Write-Host "    Reason: $($notificationStatus.Reason)" -ForegroundColor Yellow
         Write-Host '    The update run itself was unaffected.' -ForegroundColor Yellow
+    } elseif (-not $Notify) {
+        # Say that nothing was asked for. Without this the run is simply silent
+        # about notifications, which reads as a broken feature rather than an
+        # unrequested one -- and sends people looking for a BurntToast prompt
+        # that was never going to appear.
+        Write-Host ''
+        Write-Host 'Notifications: not requested. Pass -Notify for a toast when the run finishes.' -ForegroundColor DarkGray
     }
 
     Write-Host "Finished $(Get-Date). Detailed logs saved to: $logDir" -ForegroundColor Green
