@@ -10,7 +10,7 @@ and tell you what happened with a toast notification.
 Nothing but the URL is needed. Paste this into PowerShell:
 
 ```powershell
-$i = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'; Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/PowerShell-Update-Script/main/Install.ps1 -OutFile $i -UseBasicParsing; Unblock-File $i; pwsh -NoProfile -ExecutionPolicy Bypass -File $i
+$i = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'; Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1 -OutFile $i -UseBasicParsing; Unblock-File $i; pwsh -NoProfile -ExecutionPolicy Bypass -File $i
 ```
 
 It downloads the installer, which fetches the module from GitHub and installs it
@@ -50,11 +50,11 @@ process.
 From a clone instead:
 
 ```powershell
-git clone https://github.com/briankronberg/PowerShell-Update-Script.git
+git clone https://github.com/briankronberg/UpdateEverything.git
 ```
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\PowerShell-Update-Script\Install.ps1
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\UpdateEverything\Install.ps1
 ```
 
 Add `-FromGitHub` to install what is published rather than what is in the
@@ -63,7 +63,7 @@ working copy.
 To load it without installing, point `Import-Module` at the source:
 
 ```powershell
-Import-Module .\PowerShell-Update-Script\src\UpdateEverything.psd1
+Import-Module .\UpdateEverything\src\UpdateEverything.psd1
 ```
 
 Requires PowerShell 5.1 or later on Windows 10 or a matching Server release.

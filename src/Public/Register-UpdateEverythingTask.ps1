@@ -186,7 +186,7 @@ function Register-UpdateEverythingTask {
         -RunLevel Highest
 
     $description = 'Runs Update-Everything to update Windows, Microsoft 365, and every package manager it finds. ' +
-        'https://github.com/briankronberg/PowerShell-Update-Script'
+        'https://github.com/briankronberg/UpdateEverything'
 
     if (-not $PSCmdlet.ShouldProcess($fullTaskName, "Register scheduled task ($Cadence)")) {
         return

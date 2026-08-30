@@ -25,8 +25,8 @@
     PrivateData = @{
         PSData = @{
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
-            LicenseUri   = 'https://github.com/briankronberg/PowerShell-Update-Script/blob/main/LICENSE'
-            ProjectUri   = 'https://github.com/briankronberg/PowerShell-Update-Script'
+            LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
+            ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
             ReleaseNotes = '# 1.0.0
 
 First release as a module. Previously a single script.

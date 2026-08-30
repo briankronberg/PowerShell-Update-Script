@@ -14,7 +14,7 @@
 
         # from nothing but the URL
         $installer = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'
-        Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/PowerShell-Update-Script/main/Install.ps1 -OutFile $installer -UseBasicParsing
+        Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1 -OutFile $installer -UseBasicParsing
         Unblock-File $installer
         pwsh -NoProfile -ExecutionPolicy Bypass -File $installer
 
@@ -34,7 +34,7 @@
 
 .PARAMETER Repository
     The owner/name to download from. Default:
-    briankronberg/PowerShell-Update-Script.
+    briankronberg/UpdateEverything.
 
 .PARAMETER Ref
     Branch or tag to download. Default: main.
@@ -69,7 +69,7 @@ param(
     [switch] $FromGitHub,
 
     [ValidatePattern('^[\w.-]+/[\w.-]+$')]
-    [string] $Repository = 'briankronberg/PowerShell-Update-Script',
+    [string] $Repository = 'briankronberg/UpdateEverything',
 
     [ValidateNotNullOrEmpty()]
     [string] $Ref = 'main',

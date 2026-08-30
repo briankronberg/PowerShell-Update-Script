@@ -161,10 +161,10 @@ function Update-Everything {
         explanation and exit 64 rather than a UAC prompt that cannot succeed. Run
         with -SkipElevation to perform the steps that do not need admin.
 
-        Execution policy: the elevated relaunch passes -ExecutionPolicy Bypass, but
-        the first launch obeys whatever policy is in force. On a machine set to
-        AllSigned or Restricted, start it with:
-            powershell -ExecutionPolicy Bypass -File .\Update-Everything.ps1
+        Execution policy: the elevated relaunch passes -ExecutionPolicy Bypass.
+        Importing the module obeys whatever policy is in force, so on a machine
+        set to AllSigned or Restricted, start the session with:
+            pwsh -NoProfile -ExecutionPolicy Bypass -Command "Import-Module UpdateEverything; Update-Everything"
     #>
     [CmdletBinding()]
     [OutputType([pscustomobject])]
