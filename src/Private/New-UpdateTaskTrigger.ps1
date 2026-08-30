@@ -4,6 +4,7 @@
     # New-ScheduledTaskTrigger has no monthly parameter set at all -- it offers
     # Once, Daily, Weekly, Startup and Logon and nothing else -- so the monthly
     # case is built directly from the Task Scheduler CIM class instead.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object and changes nothing, so there is no operation for -WhatIf to describe.')]
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][ValidateSet('Weekly', 'PatchTuesday', 'Daily')]

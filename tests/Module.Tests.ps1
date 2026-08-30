@@ -690,3 +690,66 @@ Describe 'Get-ToolInstallSource' -Tag 'Unit' {
         $result | Should-Be 'Standalone'
     }
 }
+
+Describe 'Ready for the PowerShell Gallery' -Tag 'Static','Module' {
+
+    # The gallery runs PSScriptAnalyzer with its own default rules and shows the
+    # result on the package page. This repository's settings suppress several
+    # rules deliberately, so the gallery sees more than local linting does.
+    # Anything genuinely intentional carries a SuppressMessageAttribute with a
+    # justification, which is the sanctioned way to say so in code.
+    It 'has no analyzer findings under the default rules the gallery uses' -Skip:(-not $HasAnalyzer) {
+        $findings = foreach ($file in Get-ChildItem $script:ModuleRoot -Recurse -Include *.ps1, *.psm1) {
+            Invoke-ScriptAnalyzer -Path $file.FullName
+        }
+
+        $detail = ($findings | ForEach-Object {
+            '{0}:{1} {2}' -f (Split-Path $_.ScriptPath -Leaf), $_.Line, $_.RuleName
+        }) -join "`n"
+
+        $findings | Should-BeNull -Because "the gallery would display these:`n$detail"
+    }
+
+    It 'justifies every suppression rather than silencing rules blankly' {
+        $bare = foreach ($file in Get-ChildItem $script:ModuleRoot -Recurse -Filter *.ps1) {
+            Select-String -Path $file.FullName -Pattern 'SuppressMessageAttribute' |
+                Where-Object { $_.Line -notmatch "Justification\s*=\s*'.{20,}" } |
+                ForEach-Object { "$($file.Name):$($_.LineNumber)" }
+        }
+
+        $bare | Should-BeNull -Because "a suppression without a reason is just a hidden warning:`n$($bare -join "`n")"
+    }
+
+    It 'declares the editions it supports' {
+        (Import-PowerShellDataFile $script:Manifest).CompatiblePSEditions |
+            Should-BeCollection -Count 2
+    }
+
+    # An empty help folder ships nothing and looks like an oversight.
+    It 'ships an about topic' {
+        $help = Join-Path $script:ModuleRoot 'en-us\about_UpdateEverything.help.txt'
+        Test-Path $help | Should-BeTrue
+        (Get-Content $help -Raw).Length | Should-BeGreaterThan 500
+    }
+
+    # Publish-Module needs the folder named after the module, and this repository
+    # keeps its source in src, so publishing has to stage first. A script that
+    # does it the same way every time beats remembering to.
+    It 'ships a publish script that stages into a correctly named folder' {
+        $publish = Join-Path $script:RepoRoot 'Publish.ps1'
+        Test-Path $publish | Should-BeTrue
+
+        $source = Get-Content $publish -Raw
+        $source | Should-MatchString 'Join-Path \$staging \$manifest\.Name'
+        $source | Should-MatchString 'Publish-Module'
+    }
+
+    # -WhatIf must skip the publish, not the checks. It once skipped the staging
+    # copy too, and then validated a folder that had never been created.
+    It 'still stages under -WhatIf, so the checks have something to validate' {
+        $source = Get-Content (Join-Path $script:RepoRoot 'Publish.ps1') -Raw
+
+        $source | Should-MatchString 'New-Item[^\r\n]*-WhatIf:\$false'
+        $source | Should-MatchString 'Copy-Item[^\r\n]*-WhatIf:\$false'
+    }
+}

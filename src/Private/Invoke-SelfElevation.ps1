@@ -1,4 +1,4 @@
-function Invoke-SelfElevation {
+﻿function Invoke-SelfElevation {
     <#
         .SYNOPSIS
         Re-runs Update-Everything elevated, in its own window, and returns the
@@ -14,6 +14,7 @@ function Invoke-SelfElevation {
         It returns rather than exits. Killing the session someone called a
         function from would be a poor way to repay them for asking.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of a console maintenance tool. Its output is progress a person watches, not data a caller consumes, and the summary uses colour to separate failures from noise.')]
     [CmdletBinding()]
     [OutputType([int])]
     param(

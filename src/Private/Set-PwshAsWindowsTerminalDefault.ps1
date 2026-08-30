@@ -1,6 +1,9 @@
 ﻿function Set-PwshAsWindowsTerminalDefault {
     # Points Windows Terminal's defaultProfile at the PowerShell 7 (PowershellCore)
     # profile. Only the defaultProfile value is rewritten; nothing else is touched.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of a console maintenance tool. Its output is progress a person watches, not data a caller consumes, and the summary uses colour to separate failures from noise.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Called from one step, which reports what it did and backs the file up before writing. The step, not this helper, is where a caller decides whether to proceed.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'The parameter belongs to a MatchEvaluator delegate signature and must be declared whether or not the body reads it.')]
     param([Parameter(Mandatory)][string] $LogDir)
 
     $candidates = @(

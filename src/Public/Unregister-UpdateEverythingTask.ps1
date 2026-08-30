@@ -1,4 +1,4 @@
-function Unregister-UpdateEverythingTask {
+﻿function Unregister-UpdateEverythingTask {
     <#
     .SYNOPSIS
         Removes the Update-Everything scheduled task.
@@ -16,6 +16,7 @@ function Unregister-UpdateEverythingTask {
     .EXAMPLE
         Unregister-UpdateEverythingTask
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of a console maintenance tool. Its output is progress a person watches, not data a caller consumes, and the summary uses colour to separate failures from noise.')]
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'High')]
     param(
         [ValidateNotNullOrEmpty()]

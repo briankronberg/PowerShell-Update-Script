@@ -1,4 +1,4 @@
-@{
+﻿@{
     RootModule        = 'UpdateEverything.psm1'
     ModuleVersion     = '1.0.0'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
@@ -10,6 +10,10 @@
     # and a maintenance tool that cannot run on a machine before it has been
     # updated is not much use.
     PowerShellVersion = '5.1'
+
+    # Declared so the gallery can filter on it, and so a Core-only or
+    # Desktop-only consumer is told before installing rather than after.
+    CompatiblePSEditions = @('Desktop', 'Core')
 
     FunctionsToExport = @(
         'Update-Everything'

@@ -4,6 +4,7 @@
     # $Host.UI.PromptForChoice has no timeout, and a scheduled run blocked on a
     # question nobody is there to answer would sit until the task's execution
     # time limit killed it -- turning "ask politely" into "never update again".
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'The prompt is drawn for a person to read and answer. Sending it down the pipeline would make it the return value instead.')]
     [CmdletBinding()]
     [OutputType([int])]
     param(

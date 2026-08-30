@@ -13,6 +13,7 @@
     # So ask the group instead, by SID rather than by name, because
     # 'Administrators' is localised. Anything unresolvable returns $null, and the
     # caller treats unknown as "attempt it" rather than "refuse".
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseOutputTypeCorrectly', '', Justification = 'Deliberately tri-state: true, false, or null when membership cannot be determined. No single OutputType describes that honestly.')]
     [CmdletBinding()]
     param()
 

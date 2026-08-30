@@ -50,7 +50,7 @@ try {
         $pendingReboot = $true
         $rebootReasons.Add("Computer rename pending ($activeName -> $targetName)")
     }
-} catch { }
+} catch { Write-Verbose "Could not read the computer name keys: $($_.Exception.Message)" }
 
     [pscustomobject]@{
         IsPending = $pendingReboot

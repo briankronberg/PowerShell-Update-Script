@@ -1,6 +1,7 @@
 ﻿function New-UpdateTaskSettingsSet {
     # Task settings tuned for a laptop that is asleep, on battery, or off the
     # network as often as not.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object and changes nothing, so there is no operation for -WhatIf to describe.')]
     [CmdletBinding()]
     param(
         [switch] $AllowBattery,

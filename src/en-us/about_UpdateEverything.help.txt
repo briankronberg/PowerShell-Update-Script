@@ -1,0 +1,79 @@
+TOPIC
+    about_UpdateEverything
+
+SHORT DESCRIPTION
+    Updates a Windows machine through every package manager and update channel
+    it can find, running each as an isolated step so one failure does not stop
+    the rest.
+
+LONG DESCRIPTION
+    UpdateEverything drives the update mechanisms already on a machine rather
+    than replacing them. It calls winget, Windows Update, Microsoft 365 Apps,
+    Defender, the PowerShell Gallery, npm, pipx, uv, Chocolatey, Scoop, rustup,
+    the .NET CLI and others, each as a separate step with its own log.
+
+    A step runs only if its tool is present. Everything else is reported as
+    skipped, so the summary distinguishes "nothing to do" from "did nothing".
+
+    Update-Everything returns an object rather than exiting, so calling it from
+    a session does not end that session. The object carries per-step records,
+    counts, reboot state and log paths. A scheduled task turns FailedCount into
+    an exit code, which is the only thing that crosses a process boundary.
+
+COMMANDS
+    Update-Everything
+        Runs the update pass and returns the result. Update-All is an alias.
+
+    Register-UpdateEverythingTask
+        Registers a scheduled task. Needs an elevated session, because the task
+        itself runs with the highest privileges.
+
+    Get-UpdateEverythingTask
+        Reports the registered task, or nothing when there is none.
+
+    Unregister-UpdateEverythingTask
+        Removes the task.
+
+    Test-PendingReboot
+        Reports whether Windows is waiting on a restart, and why.
+
+INSTALLING VERSUS UPDATING
+    Updating something already installed needs no permission. Installing
+    something that was never there does, and this module will not do it
+    silently.
+
+    Without -AllowInstall, an interactive run asks before each first-time
+    install and defaults to No. A non-interactive run declines and reports the
+    step as skipped, because there is nobody to ask. Approve in advance with
+    -AllowInstall, which accepts All, PowerShell7, PSWindowsUpdate,
+    NuGetProvider and BurntToast.
+
+NOTIFICATIONS
+    -Notify raises a toast when the run finishes, and a separate urgent one
+    when a restart is pending. It needs the BurntToast module and an
+    interactive desktop session. Neither is required: without them the run
+    proceeds and says so.
+
+    A task running as SYSTEM cannot show a notification, which is why
+    Register-UpdateEverythingTask registers the task to run as you.
+
+LOGS
+    Logs go to the first writable location among USERPROFILE, LOCALAPPDATA,
+    TEMP and the module directory, under UpdateLogs. Each run writes a
+    transcript and one file per step.
+
+    Many command line tools write ordinary progress to stderr, so a step is
+    marked Warning only when PowerShell itself raised an error record.
+
+EXAMPLES
+    Update-Everything
+
+    Update-Everything -IncludeWindowsUpdate $false
+
+    Update-Everything -SkipElevation
+
+    Register-UpdateEverythingTask -Cadence Weekly -AllowInstall PSWindowsUpdate
+
+SEE ALSO
+    https://github.com/briankronberg/UpdateEverything
+    Get-Help Update-Everything -Full

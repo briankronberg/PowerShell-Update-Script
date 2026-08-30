@@ -1,4 +1,4 @@
-function Update-Everything {
+﻿function Update-Everything {
 
     <#
     .SYNOPSIS
@@ -166,6 +166,8 @@ function Update-Everything {
         set to AllSigned or Restricted, start the session with:
             pwsh -NoProfile -ExecutionPolicy Bypass -Command "Import-Module UpdateEverything; Update-Everything"
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of a console maintenance tool. Its output is progress a person watches, not data a caller consumes, and the summary uses colour to separate failures from noise.')]
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Every action that changes the machine is already gated: -PromptBeforeRun offers a way out, -AllowInstall gates first-time installs, and each step reports what it did. A -WhatIf that ran nothing would duplicate -SkipElevation without adding safety.')]
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
@@ -266,8 +268,8 @@ function Update-Everything {
             switch (Request-RunDecision -TimeoutSeconds $PromptTimeoutSeconds -DelayMinutes $DelayMinutes) {
                 'Skip' {
                     Write-Host 'Skipped at your request. Nothing was changed.' -ForegroundColor Yellow
-                    if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { } }
-                    try { [Console]::OutputEncoding = $originalOutputEncoding } catch { }
+                    if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { Write-Verbose "Transcript already stopped." } }
+                    try { [Console]::OutputEncoding = $originalOutputEncoding } catch { Write-Verbose "Could not restore the console encoding." }
                     # Not a failure. You decided, and the next scheduled run stands.
                     return (New-UpdateEverythingResult -Ran $false -Elevated:$isAdmin `
                         -Reason 'Skipped at the pre-run prompt.' -LogDirectory $logDir -MainLog $mainLog)
@@ -877,8 +879,8 @@ function Update-Everything {
         Write-Host "$($failedSteps.Count) step(s) failed." -ForegroundColor Red
     }
 
-    if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { } }
-    try { [Console]::OutputEncoding = $originalOutputEncoding } catch { }
+    if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { Write-Verbose "Transcript already stopped." } }
+    try { [Console]::OutputEncoding = $originalOutputEncoding } catch { Write-Verbose "Could not restore the console encoding." }
 
     # Returned rather than exited. A scheduled task turns FailedCount into an
     # exit code itself; a session that called this function keeps running.

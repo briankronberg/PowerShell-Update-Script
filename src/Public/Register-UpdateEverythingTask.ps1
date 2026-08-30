@@ -1,4 +1,4 @@
-function Register-UpdateEverythingTask {
+﻿function Register-UpdateEverythingTask {
     <#
     .SYNOPSIS
         Registers Update-Everything as a Windows scheduled task, with settings
@@ -111,6 +111,7 @@ function Register-UpdateEverythingTask {
     .OUTPUTS
         The registered scheduled task.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of a console maintenance tool. Its output is progress a person watches, not data a caller consumes, and the summary uses colour to separate failures from noise.')]
     [CmdletBinding(SupportsShouldProcess, ConfirmImpact = 'Medium')]
     param(
         [ValidateSet('Weekly', 'PatchTuesday', 'Daily')]

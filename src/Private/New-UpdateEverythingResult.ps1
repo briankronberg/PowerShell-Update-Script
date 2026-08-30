@@ -1,4 +1,4 @@
-function New-UpdateEverythingResult {
+﻿function New-UpdateEverythingResult {
     <#
         .SYNOPSIS
         Builds the object Update-Everything hands back.
@@ -12,6 +12,7 @@ function New-UpdateEverythingResult {
         Counts are derived from Steps rather than passed in, so they cannot
         disagree with the records they describe.
     #>
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Builds an object and changes nothing, so there is no operation for -WhatIf to describe.')]
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(

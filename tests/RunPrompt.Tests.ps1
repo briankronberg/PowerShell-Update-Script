@@ -197,7 +197,17 @@ Describe 'The prompt cannot hang a run' -Tag 'Static','Prompt' {
     # Choosing not to run is a decision, not a fault, so it must not land in
     # FailedCount. As a module it returns a result rather than exiting, which
     # would have taken the caller's session with it.
+    # Bounded by the next branch rather than by a character count. The proximity
+    # window this used to rely on broke the moment a suppression attribute was
+    # added above it, which is a poor reason for a test to fail.
     It 'skips by returning a result, not by exiting' {
-        $script:Source | Should-MatchString "(?s)'Skip'.{0,500}New-UpdateEverythingResult -Ran \`$false"
+        $skip  = $script:Source.IndexOf("'Skip' {")
+        $delay = $script:Source.IndexOf("'Delay' {")
+
+        $skip  | Should-BeGreaterThan -1
+        $delay | Should-BeGreaterThan $skip
+
+        $branch = $script:Source.Substring($skip, $delay - $skip)
+        $branch | Should-MatchString 'New-UpdateEverythingResult -Ran'
     }
 }

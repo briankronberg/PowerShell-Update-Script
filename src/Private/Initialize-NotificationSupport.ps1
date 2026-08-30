@@ -7,6 +7,7 @@
     # The reason is returned, not just logged, so the end-of-run summary can
     # repeat it. A warning printed at the moment of discovery has scrolled well
     # out of sight by the time a long run finishes.
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of a console maintenance tool. Its output is progress a person watches, not data a caller consumes, and the summary uses colour to separate failures from noise.')]
     [CmdletBinding()]
     [OutputType([pscustomobject])]
     param(
