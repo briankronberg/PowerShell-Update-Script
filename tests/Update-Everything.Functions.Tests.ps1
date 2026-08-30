@@ -514,6 +514,35 @@ Describe 'Invoke-Step does not use the writer that caused the encoding split' -T
     }
 }
 
+Describe 'Helpers called from inside a step do not use Write-Host' -Tag 'Static' {
+
+    # Windows PowerShell routes Write-Host through the information stream. Inside
+    # an Invoke-Step action, *>&1 merges that into the pipeline, so the line was
+    # written to the console once by Write-Host and rendered again by
+    # Out-Default. The transcript recorded both, one wrapped to console width and
+    # one not:
+    #
+    #   Windows Terminal settings:
+    #   C:\Users\...\LocalState\settings.json
+    #   Windows Terminal settings: C:\Users\...\LocalState\settings.json
+    #
+    # Update-Everything's own summary is not inside a step, so Write-Host is
+    # still correct there and this only covers the helpers a step calls.
+
+    It 'Set-PwshAsWindowsTerminalDefault writes to the pipeline, not the host' {
+        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Set-PwshAsWindowsTerminalDefault.ps1'
+        $ast  = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref] $null, [ref] $null)
+
+        $calls = $ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -eq 'Write-Host'
+            }, $true)
+
+        $calls | Should-BeNull -Because 'inside a step, Write-Host is logged twice on Windows PowerShell'
+    }
+}
+
 Describe 'Test-ParameterSupport' -Tag 'Unit' {
 
     # Windows PowerShell ships PowerShellGet 1.0.0.1, whose Update-Module has no

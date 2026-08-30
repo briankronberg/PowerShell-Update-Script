@@ -1,7 +1,13 @@
 ﻿function Set-PwshAsWindowsTerminalDefault {
     # Points Windows Terminal's defaultProfile at the PowerShell 7 (PowershellCore)
     # profile. Only the defaultProfile value is rewritten; nothing else is touched.
-    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of a console maintenance tool. Its output is progress a person watches, not data a caller consumes, and the summary uses colour to separate failures from noise.')]
+    #
+    # Write-Output, not Write-Host. This runs inside an Invoke-Step action, where
+    # *>&1 merges the information stream into the pipeline: Write-Host wrote to
+    # the console and emitted an InformationRecord that Out-Default then rendered
+    # again, so every line here appeared twice in the transcript -- once wrapped
+    # to console width, once not. Write-Host stays the right call in
+    # Update-Everything's own summary, which is not inside a step.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Called from one step, which reports what it did and backs the file up before writing. The step, not this helper, is where a caller decides whether to proceed.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'The parameter belongs to a MatchEvaluator delegate signature and must be declared whether or not the body reads it.')]
     param([Parameter(Mandatory)][string] $LogDir)
@@ -15,10 +21,10 @@
     $present = @($candidates | Where-Object { Test-Path -LiteralPath $_ })
     $settingsPath = if ($present.Count) { $present[0] } else { $null }
     if (-not $settingsPath) {
-        Write-Host 'Windows Terminal settings.json not found; Terminal not installed for this user. Skipping.'
+        Write-Output 'Windows Terminal settings.json not found; Terminal not installed for this user. Skipping.'
         return
     }
-    Write-Host "Windows Terminal settings: $settingsPath"
+    Write-Output "Windows Terminal settings: $settingsPath"
 
     # Terminal rewrites settings.json from memory when it exits, which silently
     # reverts an edit made while it is running.
@@ -49,9 +55,9 @@
     }
     if (-not $ps7Guid) {
         $ps7Guid = $wellKnownPwsh
-        Write-Host "No PowerShell Core profile present yet; using well-known GUID $ps7Guid (Terminal generates it on next launch)."
+        Write-Output "No PowerShell Core profile present yet; using well-known GUID $ps7Guid (Terminal generates it on next launch)."
     } else {
-        Write-Host "PowerShell 7 profile GUID: $ps7Guid"
+        Write-Output "PowerShell 7 profile GUID: $ps7Guid"
     }
 
     # Read the current value from the parsed object when possible, and from the
@@ -64,10 +70,10 @@
     }
 
     if ($current -eq $ps7Guid) {
-        Write-Host "Default profile is already PowerShell 7 ($ps7Guid). No change needed."
+        Write-Output "Default profile is already PowerShell 7 ($ps7Guid). No change needed."
         return
     }
-    Write-Host "Current default profile: $current"
+    Write-Output "Current default profile: $current"
 
     $backup = Join-Path $LogDir ("WindowsTerminal-settings-{0:yyyyMMdd-HHmmss}.json.bak" -f (Get-Date))
     try {
@@ -75,7 +81,7 @@
     } catch {
         throw "Could not back up settings.json to $backup; refusing to edit without a backup. $($_.Exception.Message)"
     }
-    Write-Host "Backed up settings.json -> $backup"
+    Write-Output "Backed up settings.json -> $backup"
 
     $newKv = '"defaultProfile": "' + $ps7Guid + '"'
     # Match any string value, not just a GUID. Terminal also accepts a profile
@@ -107,5 +113,5 @@
     } catch {
         throw "Could not write settings.json (is Windows Terminal holding the file?): $($_.Exception.Message)"
     }
-    Write-Host "Set Windows Terminal default profile to PowerShell 7 ($ps7Guid). Restart Windows Terminal to apply."
+    Write-Output "Set Windows Terminal default profile to PowerShell 7 ($ps7Guid). Restart Windows Terminal to apply."
 }
