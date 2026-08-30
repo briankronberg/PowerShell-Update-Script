@@ -326,6 +326,26 @@ Describe 'Logging starts before the run can decline to start' -Tag 'Static','Mod
             ($script:Source -split "`r?`n" | Select-String -Pattern $pattern |
                 Select-Object -First 1).LineNumber
         }
+
+        # The handoff assertions are bounded structurally rather than by
+        # proximity. Taking the first Stop-Transcript in the file would find the
+        # one in the "cannot elevate" return, which sits earlier and is before
+        # the handoff for reasons that have nothing to do with this rule --
+        # green for the wrong reason.
+        $lines = $script:Source -split "`r?`n"
+        $hand  = ($lines | Select-String -Pattern 'Invoke-SelfElevation -BoundParameters' |
+            Select-Object -First 1).LineNumber
+
+        # Starts after the "cannot elevate" return, not at the elevation test.
+        # That branch has a Stop-Transcript of its own, and including it made the
+        # close assertion pass against code that never closed anything before the
+        # handoff -- verified by running it against the previous implementation.
+        $open  = ($lines | Select-String -Pattern '-Ran \$false -Reason \$elevation\.Reason' |
+            Select-Object -First 1).LineNumber
+        $close = ($lines | Select-String -Pattern '-Ran \$false -Elevated' | Select-Object -First 1).LineNumber
+
+        $script:BeforeHandoff = ($lines[($open - 1)..($hand - 1)]) -join "`n"
+        $script:AfterHandoff  = ($lines[($hand - 1)..($close - 1)]) -join "`n"
     }
 
     It 'starts the transcript before testing whether it can elevate' {
@@ -356,6 +376,38 @@ Describe 'Logging starts before the run can decline to start' -Tag 'Static','Mod
         $stops  = ([regex]::Matches($script:Source, 'Stop-Transcript')).Count
 
         $stops | Should-BeGreaterThanOrEqual 3 -Because "one per early return plus the normal end; found $starts start(s) and $stops stop(s)"
+    }
+
+    # Two processes with the same transcript open at once is not benign, and it
+    # fails silently: the child's Start-Transcript -Append reports success and
+    # its content is then lost. Measured, a child needs ~1.7s to start and import
+    # before it stamps, so the one-second stamps differ today -- but that is a
+    # timing margin that narrows on faster hardware, and it guards the loss of
+    # the elevated run's transcript. So the parent does not overlap it at all.
+    It 'closes the transcript before handing off to the child' {
+        $script:BeforeHandoff |
+            Should-MatchString 'Stop-Transcript' -Because 'the child opens its own transcript on a path that can collide with this one'
+    }
+
+    It 'reopens the transcript after the child returns' {
+        $script:AfterHandoff |
+            Should-MatchString 'Start-Transcript' -Because 'the outcome still has to be recorded'
+    }
+
+    # Losing this would leave a hung child with no explanation anywhere.
+    It 'names where the real work will be logged before closing' {
+        $script:BeforeHandoff | Should-MatchString 'Handing off to an elevated run'
+    }
+
+    # Reporting it from inside Invoke-SelfElevation would put the line on the
+    # console while the transcript is closed, so an unattended run would lose it.
+    It 'reports the elevated outcome from the caller' {
+        $script:AfterHandoff | Should-MatchString 'Elevated run finished with exit code'
+    }
+
+    It 'does not also report it from inside Invoke-SelfElevation' {
+        Get-Content (Join-Path $script:ModuleRoot 'Private\Invoke-SelfElevation.ps1') -Raw |
+            Should-NotMatchString 'Write-Host "Elevated run finished'
     }
 
     It 'reports the log location even when nothing ran' {
