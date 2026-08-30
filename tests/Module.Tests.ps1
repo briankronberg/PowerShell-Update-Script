@@ -566,3 +566,48 @@ Describe 'The relaunch imports a manifest, not a folder' -Tag 'Static','Module' 
         $source | Should-MatchString "Join-Path .*ModuleRoot 'UpdateEverything\.psd1'"
     }
 }
+
+Describe 'Enter takes the default' -Tag 'Unit','Prompt' {
+
+    BeforeAll {
+        $script:Timed = Get-Content (Join-Path (Join-Path (Split-Path $PSScriptRoot -Parent) 'src') 'Private\Read-TimedChoice.ps1') -Raw
+    }
+
+    # Waiting out the timeout already chooses the default, so the obvious
+    # keypress meaning the same thing costs nothing and saves the wait.
+    It 'treats VK_RETURN as the default choice' {
+        $script:Timed | Should-MatchString 'VirtualKeyCode -eq 13'
+    }
+
+    # A host that reports no virtual key code still reports the character, so
+    # both are checked.
+    It 'also accepts a carriage return character' {
+        $script:Timed | Should-MatchString '\$key\.Character -eq "`r"'
+    }
+
+    It 'maps Enter to DefaultIndex, not to a fixed option' {
+        $script:Timed | Should-MatchString '(?s)VirtualKeyCode -eq 13.{0,120}\$DefaultIndex'
+    }
+
+    It 'tells the reader Enter is an option' {
+        $script:Timed | Should-MatchString 'Enter for the default'
+    }
+}
+
+Describe 'The summary is displayed, not returned' -Tag 'Static','Module' {
+
+    # Inside a function, unassigned pipeline output is the return value. The
+    # summary table stopped being displayed and started being returned, so the
+    # caller got an array of formatting objects with the result buried in it and
+    # the run log lost its summary entirely.
+    It 'sends Format-Table to the host rather than the pipeline' {
+        $source = Get-Content (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1') -Raw
+
+        $formats = [regex]::Matches($source, '(?m)^.*Format-Table.*$')
+        $formats.Count | Should-BeGreaterThan 0
+
+        foreach ($f in $formats) {
+            $f.Value | Should-MatchString 'Out-Host'
+        }
+    }
+}

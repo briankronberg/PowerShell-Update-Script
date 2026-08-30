@@ -798,7 +798,11 @@
     # 11. Summary + reboot check
     # ---------------------------------------------------------------------------
     Write-Host "`n================ SUMMARY ================" -ForegroundColor Green
-    $Results | Format-Table -AutoSize -Property Step, Status, Seconds
+    # Out-Host, not a bare pipeline. Inside a function, unassigned pipeline
+    # output is the return value, so this table stopped being displayed and
+    # started being returned: the caller got an array of formatting objects with
+    # the result buried among them, and the summary vanished from the run log.
+    $Results | Format-Table -AutoSize -Property Step, Status, Seconds | Out-Host
 
     $failedSteps  = @($Results | Where-Object { $_.Status -eq 'Failed' })
     $warnedSteps  = @($Results | Where-Object { $_.Status -eq 'Warning' })
