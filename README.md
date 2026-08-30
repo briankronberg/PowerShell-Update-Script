@@ -44,7 +44,7 @@ in any command below.
 
 | Parameter | Default | Effect |
 |---|---|---|
-| `-IncludeWindowsUpdate` | `$true` | Install pending updates via PSWindowsUpdate, scanning **Microsoft** Update so Office and other Microsoft products come along with the OS and drivers. Needs admin; may require a reboot. |
+| `-IncludeWindowsUpdate` | `$true` | Install pending updates via PSWindowsUpdate, scanning Microsoft Update so Office and other Microsoft products come along with the OS and drivers. Needs admin; may require a reboot. |
 | `-IncludePowerShell7` | `$true` | Install or upgrade PowerShell 7. The machine-wide MSI install needs admin. |
 | `-SetPwshTerminalDefault` | `$true` | Point Windows Terminal's default profile at PowerShell 7. Per-user; skipped if Terminal is not installed. |
 | `-AutoReboot` | off | Let Windows Update reboot on its own. Off by default; the script reports a pending reboot instead. |
@@ -63,16 +63,16 @@ in any command below.
 | Code | Meaning |
 |---|---|
 | `0` | Every step succeeded or was skipped |
-| `1`–`63` | That many steps failed. Steps finishing with warnings do not count |
-| `64` | Nothing was attempted: the run could not become Administrator |
+| `1` to `63` | That many steps failed. Steps finishing with warnings do not count |
+| `64` | Nothing ran, because the script could not become Administrator |
 
 `64` sits outside the step-count range so a wrapper can tell "did not run" from
 "ran, and something failed".
 
 ## Channels covered
 
-Each step runs only if its tool is present, and is reported as skipped
-otherwise:
+Each step runs only if its tool is on the machine. The summary lists the rest as
+skipped:
 
 winget (self-update, then all sources) · Microsoft Store apps · PowerShell 7 ·
 Microsoft 365 Apps (OfficeC2RClient) · PowerShell modules and help ·
@@ -82,9 +82,9 @@ Defender signatures · Windows Terminal default profile · Windows Update
 
 ## Running without administrator rights
 
-Elevation is checked before it is requested. An account outside the local
-Administrators group, or a machine with UAC switched off, stops with exit `64`
-rather than raising a consent prompt that cannot succeed:
+The script checks whether it can elevate before it asks. An account outside the
+local Administrators group, or a machine with UAC switched off, stops with exit
+`64` instead of raising a consent prompt that cannot succeed:
 
 ```
 WARNING: Cannot run elevated: This account is not a member of the local
@@ -93,9 +93,10 @@ WARNING: Nothing has been changed. Re-run with -SkipElevation to run the steps
 that do not need administrator rights.
 ```
 
-Where membership cannot be determined — a domain group nested inside local
-Administrators, or a group that cannot be read — elevation is attempted anyway.
-Treating "unknown" as "no" would block legitimate administrators.
+Sometimes membership cannot be determined. A domain group nested inside local
+Administrators does it, so does a group the script cannot read. In that case it
+tries to elevate anyway. Treating "unknown" as "no" would lock out real
+administrators, which is the worse mistake.
 
 With `-SkipElevation`, the run proceeds and the admin-only steps (Windows
 Update, Defender signatures, the PowerShell 7 install) are reported as skipped
@@ -106,16 +107,16 @@ launch is subject to your policy.
 
 ## Logs
 
-Logs are written to the first writable location among `%USERPROFILE%`,
+The script writes logs to the first writable location among `%USERPROFILE%`,
 `%LOCALAPPDATA%`, `%TEMP%` and the script directory, under `UpdateLogs\`:
 
-- `Update-Everything-<timestamp>.log` — transcript of the whole run
-- `<step>-<timestamp>.log` — every stream captured for that one step
+- `Update-Everything-<timestamp>.log`, the transcript of the whole run
+- `<step>-<timestamp>.log`, every stream from that one step
 
 `UpdateLogs/` and `*.log` are gitignored, so a run inside a clone stays clean.
 
-Many CLIs write ordinary progress to stderr, so a step is marked `Warning` only
-when PowerShell itself raised an error record.
+Many CLIs write ordinary progress to stderr, so a step earns `Warning` only when
+PowerShell itself raises an error record.
 
 ## Installing versus updating
 
@@ -153,8 +154,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -AllowInst
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\Update-Everything.ps1 -AllowInstall All
 ```
 
-Each component is asked about at most once per run. A declined install skips its
-step rather than failing it, so it stays out of the exit code.
+The script asks about each component at most once per run. A declined install
+skips its step rather than failing it, so it stays out of the exit code.
 
 ## Notifications
 
@@ -202,14 +203,15 @@ A maintenance run is about to start.
 Starting in  47s -- press 1-3 to choose, or wait.
 ```
 
-- **Run now** — the default, taken automatically if nobody answers.
-- **Skip** — nothing changes and the script exits 0. The next scheduled run
+- **Run now.** The default, taken automatically if nobody answers.
+- **Skip.** Nothing changes and the script exits 0. The next scheduled run
   stands.
-- **Wait** — sleeps `-DelayMinutes`, then runs.
+- **Wait.** Sleeps `-DelayMinutes`, then runs.
 
-Silence means run: an unanswered prompt usually means an unattended machine. If
-the run cannot prompt at all, because there is no console or input is
-redirected, it says so and starts immediately rather than blocking.
+Silence counts as run now. An unanswered prompt usually means nobody is at the
+machine, which is when the updates matter most. If the run cannot prompt at all,
+because there is no console or input is redirected, it says so and starts
+straight away rather than blocking.
 
 ## Running on a schedule
 
@@ -252,10 +254,10 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Register-UpdateTask.ps1 -Unregis
 
 Microsoft ships on the second Tuesday, around 17:00 UTC, and the usual advice is
 to let a patch sit a few days. The intuitive way to say "the day after Patch
-Tuesday" is the second Wednesday, and it is wrong: in 12 of the 84 months from
-2026 to 2032 the second Wednesday falls *before* Patch Tuesday. The third
-Wednesday is always 1 to 8 days after it, which a test checks for every month in
-that range.
+Tuesday" is the second Wednesday, and it is wrong. In 12 of the 84 months from
+2026 to 2032 the second Wednesday falls *before* Patch Tuesday, so the run would
+fire before the patches exist. The third Wednesday is always 1 to 8 days after
+it. A test checks that for every month in the range.
 
 ### Quiet runs
 
@@ -278,7 +280,7 @@ being ignored and the task will run Normal.
 
 The task runs as you, elevated, while you are logged on. `SYSTEM` would not need
 you logged in but cannot show a notification, so the summary and restart notice
-would go nowhere. `StartWhenAvailable` covers the laptop case: a run missed
+would go nowhere. `StartWhenAvailable` covers the laptop case. A run missed
 while the machine was off happens shortly after your next logon.
 
 | Setting | Value | Reason |
@@ -336,14 +338,14 @@ and `Lint`.
 Running the script to test it would elevate, install software and possibly
 reboot the machine doing the testing, so the suite never runs it.
 
-**Static checks** read the script through the PowerShell AST and through
-`Get-Command` / `Get-Help`, which report a parameter block and help without
-executing the body. They hold the contract: a new parameter fails the suite
-until it is documented in both the comment-based help and the table above; a
-default flipped to reboot without asking fails it; two steps sharing a name,
-which would overwrite each other's log, fails it.
+The static checks read the script through the PowerShell AST and through
+`Get-Command` and `Get-Help`, which report a parameter block and help without
+executing the body. They hold the contract. A new parameter fails the suite
+until it is documented in both the comment-based help and the table above. So
+does a default flipped to reboot without asking. So do two steps sharing a name,
+which would overwrite each other's log.
 
-**Behavioural checks** dot-source the script and call its functions. That is
+The behavioural checks dot-source the script and call its functions. That is
 safe because of the dot-source guard, so
 
 ```powershell
@@ -358,11 +360,12 @@ File work goes to `TestDrive`, `LOCALAPPDATA` is redirected there while the
 Windows Terminal tests run, and registry probes are mocked. There is no coverage
 metric, since measuring it means executing the code under test.
 
-`Set-StrictMode` is deliberately not used. It makes reading a missing property
-fatal, and the script legitimately probes for optional keys in Windows
-Terminal's `settings.json`, where those keys are often absent. The useful half
-is recovered statically: a test walks the AST and fails if the script reads a
-variable it never assigns.
+`Set-StrictMode` is left out on purpose. It makes reading a missing property
+fatal, and the script has to probe for optional keys in Windows Terminal's
+`settings.json`, where those keys are often absent. Turning it on would break
+that path on the machines it exists to handle. A test recovers the useful half
+instead, walking the AST and failing if the script reads a variable it never
+assigns.
 
 ## Support
 
@@ -396,6 +399,6 @@ Every step writes a log, so you can see exactly what happened afterwards.
 
 ## License
 
-[MIT](LICENSE) — free to use, copy, modify and redistribute, commercially or
+[MIT](LICENSE). Free to use, copy, modify and redistribute, commercially or
 otherwise, provided the copyright notice and license text come along. The
-software is provided **as is**, without warranty of any kind.
+software is provided as is, without warranty of any kind.
