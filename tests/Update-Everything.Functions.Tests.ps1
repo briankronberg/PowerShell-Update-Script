@@ -205,6 +205,62 @@ Describe 'Test-PendingReboot' -Tag 'Unit' {
         (Test-PendingReboot).IsPending | Should-BeFalse
     }
 
+    # The entries are [source, destination] pairs. An empty destination is a
+    # scheduled deletion, not a rename, and installers queue those for their own
+    # temp files constantly. This exact value was on a real machine and made
+    # every run print "[!] A reboot is pending" while Component Based Servicing
+    # and Windows Update both reported nothing.
+    It 'does not call a scheduled deletion a pending reboot' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(
+                '*1\??\C:\Users\someone\AppData\Local\Temp\DEL396A.tmp', '') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).IsPending | Should-BeFalse
+    }
+
+    It 'gives no reboot reason for a scheduled deletion' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @('\??\C:\Temp\DEL1.tmp', '') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).Reasons | Should-BeCollection -Count 0
+    }
+
+    # A rename means Windows is holding a replacement for a file in use, and the
+    # restart is what completes it. That still has to be reported.
+    It 'still reports a real rename alongside deletions' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(
+                '\??\C:\Temp\DEL1.tmp', '',
+                '\??\C:\Windows\System32\thing.dll', '!\??\C:\Windows\System32\thing.dll') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).IsPending | Should-BeTrue
+    }
+
+    It 'counts only the renames, not the deletions beside them' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(
+                '\??\C:\Temp\DEL1.tmp', '',
+                '\??\C:\Temp\DEL2.tmp', '',
+                '\??\C:\Windows\System32\thing.dll', '!\??\C:\Windows\System32\thing.dll') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).Reasons | Should-ContainCollection 'Pending file renames (1)'
+    }
+
+    # A trailing source with no partner is malformed. Inventing a rename out of
+    # it would resurrect the false positive on exactly the machines whose
+    # registry is already untidy.
+    It 'treats an unpaired trailing entry as a deletion' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @('\??\C:\Temp\DEL1.tmp') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).IsPending | Should-BeFalse
+    }
+
     # Asking for a value that is absent, with -ErrorAction Stop, throws -- and
     # Start-Transcript records the throw as "TerminatingError(Get-ItemProperty)"
     # in the run log even though it is caught. On a healthy machine that reads
