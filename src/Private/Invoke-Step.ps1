@@ -50,10 +50,17 @@
         # almost nothing in the step log. The ForEach-Object both accumulates the
         # output for inspection and passes it through, so the console and the
         # transcript still see it live during long-running steps.
+        # Out-String -Stream, then a single writer. Tee-Object -FilePath writes
+        # UTF-16LE in Windows PowerShell and has no -Encoding there, so it fought
+        # with Write-StepLog's ANSI over the same file and left every captured
+        # line as interleaved nulls. Out-String also renders the Format* records
+        # a table arrives as into the table itself, which writing the objects one
+        # at a time would not.
         $stepOutput = [System.Collections.Generic.List[object]]::new()
         & $Action *>&1 |
             ForEach-Object { $stepOutput.Add($_); $_ } |
-            Tee-Object -FilePath $stepLog -Append
+            Out-String -Stream |
+            ForEach-Object { Write-StepLog -Path $stepLog -Raw $_; $_ }
 
         $code = $LASTEXITCODE
         if ($null -ne $code -and $code -ne 0) {

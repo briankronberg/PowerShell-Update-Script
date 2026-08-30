@@ -405,6 +405,113 @@ Describe 'Write-StepLog' -Tag 'Unit' {
 
         $warnings | Should-NotBeNull
     }
+
+    It 'writes -Raw text through without a timestamp' {
+        $log = Join-Path $TestDrive 'raw.log'
+        Write-StepLog -Path $log -Raw '    Name      Id'
+
+        Get-Content $log -Raw | Should-MatchString '^ {4}Name {6}Id'
+    }
+
+    It 'accepts an empty -Raw line, which output is full of' {
+        $log = Join-Path $TestDrive 'rawempty.log'
+        Write-StepLog -Path $log -Raw ''
+        Write-StepLog -Path $log -Raw 'after'
+
+        (Get-Content $log) | Should-BeCollection -Count 2
+    }
+}
+
+Describe 'Step logs are written in one encoding' -Tag 'Unit' {
+
+    # The bug: Tee-Object -FilePath writes UTF-16LE on Windows PowerShell and has
+    # no -Encoding there, while Write-StepLog's Add-Content wrote ANSI. Both hit
+    # the same file, so every captured line arrived as interleaved nulls --
+    # "P S G a l l e r y   ( P o w e r S h e l l G e t   v 2 )". A NUL byte is
+    # the tell, and it is what this asserts on.
+
+    BeforeEach {
+        $script:logDir   = Join-Path $TestDrive ('enc-' + [guid]::NewGuid().ToString('N'))
+        $null            = New-Item -ItemType Directory -Path $script:logDir -Force
+        $script:runStamp = 'encstamp'
+        $script:Results  = [System.Collections.Generic.List[object]]::new()
+    }
+
+    It 'keeps the captured text readable end to end' {
+        Invoke-Step -Name 'enc' -Action { 'PSGallery set to Trusted.' } 6>$null
+
+        Get-Content (Join-Path $script:logDir 'enc-encstamp.log') -Raw |
+            Should-MatchString 'PSGallery set to Trusted\.'
+    }
+
+    # Objects reach a step log as the Format* records that render a table, not as
+    # text. Writing them one at a time would log nothing useful.
+    It 'renders a table rather than its format records' {
+        Invoke-Step -Name 'enc' -Action {
+            [pscustomobject]@{ Alpha = 1; Beta = 'two' } | Format-Table -AutoSize
+        } 6>$null
+
+        $text = Get-Content (Join-Path $script:logDir 'enc-encstamp.log') -Raw
+        $text | Should-MatchString 'Alpha Beta'
+        $text | Should-MatchString '1 two'
+    }
+
+    # The status lines and the captured output are written by the same function
+    # now, so the two halves of the file have to agree.
+    It 'writes the status lines in the same encoding as the output' {
+        Invoke-Step -Name 'enc' -Action { 'work' } 6>$null
+
+        $text = Get-Content (Join-Path $script:logDir 'enc-encstamp.log') -Raw
+        $text | Should-MatchString 'STARTING enc'
+        $text | Should-MatchString 'COMPLETED \| Duration:'
+    }
+
+    # This is the one that would have caught the bug, and it only can from 5.1.
+    # Tee-Object -FilePath defaults to UTF-16LE there and takes no -Encoding to
+    # say otherwise; on 7 it writes UTF-8 and the same code looks fine. The suite
+    # runs on 7, so without shelling out nothing here would ever notice.
+    It 'leaves no NUL bytes in a step log written by Windows PowerShell' -Skip:(-not (Get-Command powershell.exe -ErrorAction SilentlyContinue)) {
+        $dir = Join-Path ([System.IO.Path]::GetTempPath()) ('ue-enc-' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $dir -Force
+
+        try {
+            $child = @"
+Get-ChildItem '$script:ModuleRoot\Private\*.ps1' | ForEach-Object { . `$_.FullName }
+`$script:logDir   = '$dir'
+`$script:runStamp = 'enc'
+`$script:Results  = [System.Collections.Generic.List[object]]::new()
+Invoke-Step -Name 'step' -Action { 'PSGallery set to Trusted.' } 6>`$null | Out-Null
+`$bytes = [System.IO.File]::ReadAllBytes((Join-Path '$dir' 'step-enc.log'))
+'NULS=' + @(`$bytes | Where-Object { `$_ -eq 0 }).Count
+"@
+            $output = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $child
+
+            ($output -join ' ') | Should-MatchString 'NULS=0'
+        } finally {
+            Remove-Item $dir -Recurse -Force -ErrorAction SilentlyContinue
+        }
+    }
+}
+
+Describe 'Invoke-Step does not use the writer that caused the encoding split' -Tag 'Static' {
+
+    # A behavioural guard cannot see this from PowerShell 7, where Tee-Object
+    # writes UTF-8 and the bug is invisible. Naming the construct is what keeps
+    # it from coming back on the edition where it does damage.
+    # The AST, not a text search: the comment explaining why Tee-Object is gone
+    # names it, and a regex over the source cannot tell a comment from a call.
+    It 'never writes the step log with Tee-Object' {
+        $path = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Invoke-Step.ps1'
+        $ast  = [System.Management.Automation.Language.Parser]::ParseFile($path, [ref] $null, [ref] $null)
+
+        $calls = $ast.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -eq 'Tee-Object'
+            }, $true)
+
+        $calls | Should-BeNull -Because 'Tee-Object writes UTF-16LE on 5.1 and takes no -Encoding there'
+    }
 }
 
 Describe 'Test-ParameterSupport' -Tag 'Unit' {
