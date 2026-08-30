@@ -64,10 +64,20 @@
         # the transcript recorded none of the run it was supposed to be a record
         # of. Sending it to the host displays it live, the transcript picks it up
         # from there, and only the result object comes back.
+        # The Where-Object drops progress repaints. PowerShell splits captured
+        # native output on carriage returns, so a tool that redraws a progress
+        # bar in place -- winget above all -- arrives as one line per repaint
+        # and a single download becomes a column of percentages and spinner
+        # ticks, on the console and in the log alike. Nothing upstream prevents
+        # it: --disable-interactivity governs prompts, not rendering.
+        #
+        # $stepOutput is filled before the filter, so the error-record check
+        # below still sees everything the step produced.
         $stepOutput = [System.Collections.Generic.List[object]]::new()
         & $Action *>&1 |
             ForEach-Object { $stepOutput.Add($_); $_ } |
             Out-String -Stream |
+            Where-Object { -not (Test-ProgressRepaint -Line $_) } |
             ForEach-Object { Write-StepLog -Path $stepLog -Raw $_; $_ } |
             Out-Host
 

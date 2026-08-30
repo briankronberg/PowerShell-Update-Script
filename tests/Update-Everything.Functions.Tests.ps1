@@ -680,6 +680,95 @@ Describe 'Helpers called from inside a step do not use Write-Host' -Tag 'Static'
     }
 }
 
+Describe 'Test-ProgressRepaint' -Tag 'Unit' {
+
+    # winget repaints its progress bar with carriage returns, and PowerShell
+    # splits captured native output on those, so one download arrives as a
+    # column of spinner ticks and percentages -- on the console and in the log.
+    # Nothing upstream prevents it: --disable-interactivity governs prompts.
+
+    It 'drops the <_> spinner tick' -ForEach @('-', '\', '|', '/') {
+        $tick = $_
+        Test-ProgressRepaint -Line "  $tick" | Should-BeTrue
+    }
+
+    It 'drops a bare percentage' {
+        Test-ProgressRepaint -Line '   86%' | Should-BeTrue
+    }
+
+    It 'drops a block bar carrying a percentage' {
+        $bar = [string]([char]0x2588) * 12
+        Test-ProgressRepaint -Line "$bar  48%" | Should-BeTrue
+    }
+
+    It 'drops a block bar with no label' {
+        Test-ProgressRepaint -Line ([string]([char]0x2588) * 20) | Should-BeTrue
+    }
+
+    It 'keeps a line of real output' {
+        Test-ProgressRepaint -Line 'Successfully installed' | Should-BeFalse
+    }
+
+    It 'keeps a line that merely mentions a percentage' {
+        Test-ProgressRepaint -Line 'Disk is 86% full' | Should-BeFalse
+    }
+
+    # winget underlines its upgrade table with runs of hyphens. Reading that as
+    # a spinner would eat the header of the one table people actually read.
+    It 'keeps a table underline made of hyphens' {
+        Test-ProgressRepaint -Line '------- ------ -------- ---------- -------' | Should-BeFalse
+    }
+
+    It 'keeps a rule made of equals signs' {
+        Test-ProgressRepaint -Line '================' | Should-BeFalse
+    }
+
+    # Blank lines are structure, not repaint noise, and the caller already
+    # collapses nothing -- so removing them here would reflow real output.
+    It 'keeps a blank line' {
+        Test-ProgressRepaint -Line '' | Should-BeFalse
+    }
+
+    It 'accepts a null line rather than throwing' {
+        Test-ProgressRepaint -Line $null | Should-BeFalse
+    }
+
+    It 'returns a real boolean' {
+        Test-ProgressRepaint -Line 'text' | Should-HaveType ([bool])
+    }
+}
+
+Describe 'A step strips progress repaints from what it shows and logs' -Tag 'Unit' {
+
+    BeforeEach {
+        $script:logDir   = Join-Path $TestDrive ('rp-' + [guid]::NewGuid().ToString('N'))
+        $null            = New-Item -ItemType Directory -Path $script:logDir -Force
+        $script:runStamp = 'rp'
+        $script:Results  = [System.Collections.Generic.List[object]]::new()
+    }
+
+    It 'keeps the real lines and drops the repaints' {
+        Invoke-Step -Name 'prog' -Action {
+            'Starting package install...'
+            '  -'
+            '  \'
+            ([string]([char]0x2588) * 8) + '  48%'
+            '95%'
+            'Successfully installed'
+        } 6>$null
+
+        $body = @(Get-Content (Join-Path $script:logDir 'prog-rp.log') |
+            Where-Object { $_ -notmatch '^\d{4}-\d{2}-\d{2} ' })
+
+        $body | Should-BeCollection -Count 2
+    }
+
+    It 'still records the step as OK' {
+        Invoke-Step -Name 'prog' -Action { '  /'; '50%'; 'done' } 6>$null
+        $script:Results[0].Status | Should-Be 'OK'
+    }
+}
+
 Describe 'Test-ParameterSupport' -Tag 'Unit' {
 
     # Windows PowerShell ships PowerShellGet 1.0.0.1, whose Update-Module has no
