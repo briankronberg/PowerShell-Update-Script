@@ -194,35 +194,17 @@
     # the private helpers read them as $script:. Inside a module a plain
     # assignment is function-scoped, so Invoke-Step would read an unset
     # $script:logDir and fail on every single step.
-    $script:isAdmin = Test-IsAdministrator
-    if (-not $isAdmin -and -not $SkipElevation) {
-        # Ask whether elevation is possible before asking for it. Without this the
-        # script raises a UAC prompt a standard user can never satisfy, and reports
-        # the refusal as though the user had declined it.
-        $elevation = Test-ElevationCapability
-        if (-not $elevation.CanElevate) {
-            Write-Warning "Cannot run elevated: $($elevation.Reason)"
-            Write-Warning 'Nothing has been changed. Re-run with -SkipElevation to run the steps that do not need administrator rights.'
-            return (New-UpdateEverythingResult -Ran $false -Reason $elevation.Reason)
-        }
-
-        # A module function must not kill the session it was called from, so the
-        # elevated child's outcome comes back as a result rather than an exit.
-        $child = Invoke-SelfElevation -BoundParameters $PSBoundParameters
-        return (New-UpdateEverythingResult -Ran $false -Elevated `
-            -Reason "Re-ran elevated in a separate window, which finished with exit code $child." `
-            -FailedCount ([int] $child))
-    }
-
-    if (-not $isAdmin) {
-        Write-Warning 'Running without administrator rights. Steps that require admin will be skipped and listed in the summary.'
-    }
-
     # TLS: no hardcoded override. Modern Windows/PowerShell negotiates TLS 1.2/1.3 automatically.
     $originalOutputEncoding = Initialize-ConsoleEncoding
 
     # ---------------------------------------------------------------------------
     # 1. Logging
+    #
+    # Before the elevation decision, not after it. Logging used to start once
+    # elevation had already succeeded, so every way this run could decline to
+    # start -- a standard user, UAC switched off, a host that cannot be elevated
+    # at all -- produced no log whatsoever. A PowerShell 7 run that could not
+    # elevate left nothing behind to read, and never would have.
     # ---------------------------------------------------------------------------
     $script:logDir = Get-UpdateLogDirectory
 
@@ -248,6 +230,40 @@
         $transcriptRunning = $true
     } catch {
         Write-Warning "Transcript unavailable ($($_.Exception.Message)); per-step logs are unaffected."
+    }
+
+    $script:isAdmin = Test-IsAdministrator
+    if (-not $isAdmin -and -not $SkipElevation) {
+        # Ask whether elevation is possible before asking for it. Without this the
+        # script raises a UAC prompt a standard user can never satisfy, and reports
+        # the refusal as though the user had declined it.
+        $elevation = Test-ElevationCapability
+        if (-not $elevation.CanElevate) {
+            Write-Warning "Cannot run elevated: $($elevation.Reason)"
+            Write-Warning 'Nothing has been changed. Re-run with -SkipElevation to run the steps that do not need administrator rights.'
+
+            if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { Write-Verbose "Transcript already stopped." } }
+            try { [Console]::OutputEncoding = $originalOutputEncoding } catch { Write-Verbose "Could not restore the console encoding." }
+
+            return (New-UpdateEverythingResult -Ran $false -Reason $elevation.Reason `
+                -LogDirectory $logDir -MainLog $mainLog)
+        }
+
+        # A module function must not kill the session it was called from, so the
+        # elevated child's outcome comes back as a result rather than an exit.
+        $child = Invoke-SelfElevation -BoundParameters $PSBoundParameters
+
+        if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { Write-Verbose "Transcript already stopped." } }
+        try { [Console]::OutputEncoding = $originalOutputEncoding } catch { Write-Verbose "Could not restore the console encoding." }
+
+        return (New-UpdateEverythingResult -Ran $false -Elevated `
+            -Reason "Re-ran elevated in a separate window, which finished with exit code $child." `
+            -FailedCount ([int] $child) `
+            -LogDirectory $logDir -MainLog $mainLog)
+    }
+
+    if (-not $isAdmin) {
+        Write-Warning 'Running without administrator rights. Steps that require admin will be skipped and listed in the summary.'
     }
 
     # Notifications are resolved before any work starts, not after it. A warning

@@ -267,6 +267,60 @@ Describe 'Shared run state' -Tag 'Static','Module' {
     }
 }
 
+Describe 'Logging starts before the run can decline to start' -Tag 'Static','Module' {
+
+    # Logging used to be set up after elevation succeeded, so every path that
+    # ended the run early produced no log at all. A PowerShell 7 run that could
+    # not elevate left nothing behind to read, which is exactly the case someone
+    # would go looking for a log to explain.
+
+    BeforeAll {
+        $script:Source = Get-Content $script:MainPath -Raw
+
+        $script:LineOf = {
+            param($pattern)
+            ($script:Source -split "`r?`n" | Select-String -Pattern $pattern |
+                Select-Object -First 1).LineNumber
+        }
+    }
+
+    It 'starts the transcript before testing whether it can elevate' {
+        $transcript = & $script:LineOf 'Start-Transcript'
+        $elevation  = & $script:LineOf 'Test-ElevationCapability'
+
+        $transcript | Should-BeLessThan $elevation
+    }
+
+    It 'resolves the log directory before testing whether it can elevate' {
+        $logDir    = & $script:LineOf '\$script:logDir\s*=\s*Get-UpdateLogDirectory'
+        $elevation = & $script:LineOf 'Test-ElevationCapability'
+
+        $logDir | Should-BeLessThan $elevation
+    }
+
+    It 'starts the transcript before handing off to an elevated child' {
+        $transcript = & $script:LineOf 'Start-Transcript'
+        $elevate    = & $script:LineOf 'Invoke-SelfElevation'
+
+        $transcript | Should-BeLessThan $elevate
+    }
+
+    # Opening a transcript and returning without closing it leaves it running in
+    # the caller's session, where it silently records everything they do next.
+    It 'stops the transcript on every early return' {
+        $starts = ([regex]::Matches($script:Source, 'Start-Transcript')).Count
+        $stops  = ([regex]::Matches($script:Source, 'Stop-Transcript')).Count
+
+        $stops | Should-BeGreaterThanOrEqual 3 -Because "one per early return plus the normal end; found $starts start(s) and $stops stop(s)"
+    }
+
+    It 'reports the log location even when nothing ran' {
+        # Both early returns take -LogDirectory now, so the caller can find the
+        # transcript that explains the refusal.
+        $script:Source | Should-MatchString '-Ran \$false -Reason \$elevation\.Reason `\r?\n\s*-LogDirectory \$logDir -MainLog \$mainLog'
+    }
+}
+
 Describe 'Update-Everything' -Tag 'Static' {
 
     Context 'Parameter contract' {
