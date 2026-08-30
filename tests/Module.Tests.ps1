@@ -230,6 +230,43 @@ Describe 'Module source layout' -Tag 'Static','Module' {
     }
 }
 
+Describe 'Shared run state' -Tag 'Static','Module' {
+
+    # As a script, $logDir and friends sat at script scope, so the private
+    # helpers reading $script:logDir saw the same variable. Inside a module a
+    # plain assignment is function-scoped and $script: means module scope, so
+    # the helpers read $null and every step failed on Join-Path. The suite did
+    # not notice, because the behavioural tests set $script:logDir themselves.
+    It 'assigns <_> at module scope, where the private helpers read it' -ForEach @(
+        'isAdmin', 'logDir', 'runStamp', 'Results'
+    ) {
+        $name = $_
+        $source = Get-Content (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1') -Raw
+
+        $unqualified = [regex]::Matches($source, "(?m)^\s*\`$$name\s*=")
+        $unqualified.Count | Should-Be 0 -Because "a plain `$$name assignment is function-scoped, so `$script:$name stays unset"
+
+        $source | Should-MatchString ([regex]::Escape('$script:' + $name) + '\s*=')
+    }
+
+    It 'reads no module-scope name the entry point never sets' {
+        $publicSource = Get-Content (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1') -Raw
+
+        $privateSource = (Get-ChildItem (Join-Path $script:ModuleRoot 'Private') -Filter *.ps1 |
+            Get-Content -Raw) -join "`n"
+
+        $read = [regex]::Matches($privateSource, '\$script:(\w+)') |
+            ForEach-Object { $_.Groups[1].Value } | Sort-Object -Unique
+
+        # ModuleRoot is set by the loader rather than by Update-Everything.
+        $set = @('ModuleRoot') + ([regex]::Matches($publicSource, '\$script:(\w+)\s*=') |
+            ForEach-Object { $_.Groups[1].Value })
+
+        $orphans = $read | Where-Object { $_ -notin $set }
+        $orphans | Should-BeNull -Because "these read as `$null at run time: $($orphans -join ', ')"
+    }
+}
+
 Describe 'Update-Everything' -Tag 'Static' {
 
     Context 'Parameter contract' {

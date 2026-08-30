@@ -32,7 +32,12 @@
                 # raw console write, so the countdown redraws on screen without
                 # writing a line per second into the run log. A 60 second wait
                 # was putting 52 lines of countdown into a 276 line transcript.
-                [Console]::Write("`rStarting in {0,3}s -- press 1-{1} to choose, or wait. " -f $remaining, $Choice.Count)
+                # The extra parentheses matter. Inside a method call the comma
+                # separates arguments, so Write("..." -f $a, $b) is parsed as
+                # Write(("..." -f $a), $b): the format string gets one argument
+                # and .NET throws about the argument list, which the catch below
+                # then reports as an unreadable keypress.
+                [Console]::Write(("`rStarting in {0,3}s -- press 1-{1} to choose, or wait. " -f $remaining, $Choice.Count))
                 $lastShown = $remaining
             }
 

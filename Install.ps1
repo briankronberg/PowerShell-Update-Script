@@ -2,29 +2,43 @@
 
 <#
 .SYNOPSIS
-    Installs the UpdateEverything module from this clone onto the current
-    machine.
+    Installs the UpdateEverything module, either from a clone or straight from
+    GitHub.
 
 .DESCRIPTION
-    Copies src\ into your PowerShell module path so that Import-Module
-    UpdateEverything works from any session, then reports what it exported.
+    Downloads the repository and installs the module when run on its own, and
+    installs from the clone it sits in when there is one. So both of these work:
 
-    This is for installing from a clone. Once the module is on the PowerShell
-    Gallery, Install-Module UpdateEverything is the shorter route and handles
-    updates for you.
+        # from a clone
+        pwsh -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
 
-    Installs for the current user by default, which needs no elevation.
+        # from nothing but this file
+        $installer = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'
+        Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/PowerShell-Update-Script/main/Install.ps1 -OutFile $installer
+        & $installer
+
+    Installs for the current user by default, which needs no elevation, and for
+    both PowerShell editions, because they read different module folders.
+
+.PARAMETER FromGitHub
+    Download the module from GitHub even when a local src folder is present.
+    Use this to test what someone else installing it would get.
+
+.PARAMETER Repository
+    The owner/name to download from. Default:
+    briankronberg/PowerShell-Update-Script.
+
+.PARAMETER Ref
+    Branch or tag to download. Default: main.
 
 .PARAMETER Scope
-    CurrentUser (default) installs into your own module path and needs no
-    admin rights. AllUsers installs machine-wide and does.
+    CurrentUser (default) installs into your own module path and needs no admin
+    rights. AllUsers installs machine-wide and does.
 
 .PARAMETER CurrentEditionOnly
     Install only for the edition running this script. By default it installs for
-    both Windows PowerShell and PowerShell 7, because the module supports 5.1
-    and the two editions read different module folders. Installing from pwsh
-    alone would leave the module invisible to Windows PowerShell, which is a
-    confusing way to find out they are separate.
+    both Windows PowerShell and PowerShell 7. Installing from pwsh alone would
+    leave the module invisible to the edition the manifest promises to support.
 
 .PARAMETER Force
     Overwrite an existing install of the same version.
@@ -33,18 +47,25 @@
     Return the installed module rather than only printing a summary.
 
 .EXAMPLE
-    pwsh -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+    pwsh -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -FromGitHub
 
 .EXAMPLE
     pwsh -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Scope AllUsers
 
 .NOTES
-    Uninstall by deleting the folder this reports, or with
-    Uninstall-Module UpdateEverything if it came from the gallery.
+    Uninstall by deleting the folder this reports.
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
 param(
+    [switch] $FromGitHub,
+
+    [ValidatePattern('^[\w.-]+/[\w.-]+$')]
+    [string] $Repository = 'briankronberg/PowerShell-Update-Script',
+
+    [ValidateNotNullOrEmpty()]
+    [string] $Ref = 'main',
+
     [ValidateSet('CurrentUser', 'AllUsers')]
     [string] $Scope = 'CurrentUser',
 
@@ -57,83 +78,140 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
+function Get-ModuleSourceFromGitHub {
+    <#
+        Downloads the repository as a zip and returns the path to its src folder.
+        The caller is responsible for removing $WorkingDirectory afterwards.
+    #>
+    param(
+        [Parameter(Mandatory)][string] $Repository,
+        [Parameter(Mandatory)][string] $Ref,
+        [Parameter(Mandatory)][string] $WorkingDirectory
+    )
+
+    $url = "https://github.com/$Repository/archive/refs/heads/$Ref.zip"
+    $zip = Join-Path $WorkingDirectory 'repo.zip'
+
+    Write-Host "Downloading $Repository ($Ref)..."
+    try {
+        # -UseBasicParsing because Windows PowerShell otherwise wants Internet
+        # Explorer's engine, which is absent on a server core install and slow
+        # everywhere else.
+        Invoke-WebRequest -Uri $url -OutFile $zip -UseBasicParsing
+    } catch {
+        throw "Could not download $url. A private repository returns 404 to an anonymous request, so check the repository is public and the branch name is right. $($_.Exception.Message)"
+    }
+
+    Expand-Archive -Path $zip -DestinationPath $WorkingDirectory -Force
+
+    # GitHub names the extracted folder <repo>-<ref>, so find it rather than
+    # guessing at the ref's spelling.
+    $candidates = @(Get-ChildItem -Path $WorkingDirectory -Directory |
+        ForEach-Object { Join-Path $_.FullName 'src' } |
+        Where-Object { Test-Path -LiteralPath (Join-Path $_ 'UpdateEverything.psd1') })
+
+    if (-not $candidates.Count) {
+        throw "The download from $Repository ($Ref) contains no src\UpdateEverything.psd1."
+    }
+
+    $candidates[0]
+}
+
+$workingDirectory = $null
 $source = Join-Path $PSScriptRoot 'src'
-$manifestPath = Join-Path $source 'UpdateEverything.psd1'
 
-if (-not (Test-Path -LiteralPath $manifestPath)) {
-    throw "Cannot find the module source at $source. Run this from a clone of the repository."
+# Run on its own, with no clone around it, this fetches the module rather than
+# failing. That is what makes the one-line install work.
+if ($FromGitHub -or -not (Test-Path -LiteralPath (Join-Path $source 'UpdateEverything.psd1'))) {
+    $workingDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('UpdateEverything-' + [guid]::NewGuid().ToString('N'))
+    $null = New-Item -ItemType Directory -Path $workingDirectory
+    $source = Get-ModuleSourceFromGitHub -Repository $Repository -Ref $Ref -WorkingDirectory $workingDirectory
 }
 
-$manifest = Import-PowerShellDataFile -Path $manifestPath
-$version = $manifest.ModuleVersion
+try {
+    $manifestPath = Join-Path $source 'UpdateEverything.psd1'
+    $version = (Import-PowerShellDataFile -Path $manifestPath).ModuleVersion
 
-# Ask Windows for Documents rather than assuming %USERPROFILE%\Documents.
-# OneDrive redirects it on plenty of machines, and a module written to the
-# wrong folder is simply never found.
-$documents = [Environment]::GetFolderPath('MyDocuments')
+    # Ask Windows for Documents rather than assuming %USERPROFILE%\Documents.
+    # OneDrive redirects it on plenty of machines, and a module written to the
+    # wrong folder is simply never found.
+    $documents = [Environment]::GetFolderPath('MyDocuments')
 
-# The two editions read different folders, so a module that supports both is
-# installed to both unless told otherwise.
-$editions = if ($CurrentEditionOnly) {
-    if ($PSVersionTable.PSEdition -eq 'Core') { 'PowerShell' } else { 'WindowsPowerShell' }
-} else {
-    'PowerShell', 'WindowsPowerShell'
-}
-
-$roots = foreach ($edition in $editions) {
-    if ($Scope -eq 'AllUsers') {
-        Join-Path $env:ProgramFiles "$edition\Modules"
+    $editions = if ($CurrentEditionOnly) {
+        if ($PSVersionTable.PSEdition -eq 'Core') { 'PowerShell' } else { 'WindowsPowerShell' }
     } else {
-        Join-Path $documents "$edition\Modules"
-    }
-}
-
-if ($Scope -eq 'AllUsers') {
-    $isAdmin = ([Security.Principal.WindowsPrincipal] `
-        [Security.Principal.WindowsIdentity]::GetCurrent()
-    ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
-
-    if (-not $isAdmin) {
-        throw 'Installing for AllUsers needs an elevated session. Start PowerShell as Administrator, or install for CurrentUser instead.'
-    }
-}
-
-$destinations = foreach ($root in $roots) {
-    Join-Path (Join-Path $root 'UpdateEverything') $version
-}
-
-$existing = @($destinations | Where-Object { Test-Path -LiteralPath $_ })
-if ($existing -and -not $Force) {
-    throw "UpdateEverything $version is already installed at $($existing -join ', '). Use -Force to overwrite it."
-}
-
-foreach ($destination in $destinations) {
-    if (-not $PSCmdlet.ShouldProcess($destination, "Install UpdateEverything $version")) { continue }
-
-    if (Test-Path -LiteralPath $destination) {
-        Remove-Item -LiteralPath $destination -Recurse -Force
+        'PowerShell', 'WindowsPowerShell'
     }
 
-    $null = New-Item -ItemType Directory -Path $destination -Force
-    Copy-Item -Path (Join-Path $source '*') -Destination $destination -Recurse -Force
+    $roots = foreach ($edition in $editions) {
+        if ($Scope -eq 'AllUsers') {
+            Join-Path $env:ProgramFiles "$edition\Modules"
+        } else {
+            Join-Path $documents "$edition\Modules"
+        }
+    }
+
+    if ($Scope -eq 'AllUsers') {
+        $isAdmin = ([Security.Principal.WindowsPrincipal] `
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+
+        if (-not $isAdmin) {
+            throw 'Installing for AllUsers needs an elevated session. Start PowerShell as Administrator, or install for CurrentUser instead.'
+        }
+    }
+
+    $destinations = foreach ($root in $roots) {
+        Join-Path (Join-Path $root 'UpdateEverything') $version
+    }
+
+    $existing = @($destinations | Where-Object { Test-Path -LiteralPath $_ })
+    if ($existing -and -not $Force) {
+        throw "UpdateEverything $version is already installed at $($existing -join ', '). Use -Force to overwrite it."
+    }
+
+    foreach ($destination in $destinations) {
+        if (-not $PSCmdlet.ShouldProcess($destination, "Install UpdateEverything $version")) { continue }
+
+        # Staged, then swapped. Deleting the destination first leaves a window
+        # where the module simply is not there, and anything importing it during
+        # that window fails with "no valid module file was found". A scheduled
+        # task starting seconds after an install hit exactly that.
+        $staging = "$destination.installing"
+        if (Test-Path -LiteralPath $staging) { Remove-Item -LiteralPath $staging -Recurse -Force }
+
+        $null = New-Item -ItemType Directory -Path $staging -Force
+        Copy-Item -Path (Join-Path $source '*') -Destination $staging -Recurse -Force
+
+        # Prove the copy is loadable before it replaces a working install.
+        $null = Import-PowerShellDataFile -Path (Join-Path $staging 'UpdateEverything.psd1')
+
+        if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
+        Move-Item -LiteralPath $staging -Destination $destination
+    }
+
+    # Import by path so this reports on the copy just written, not on some other
+    # version that happens to sit earlier in the module path.
+    $installed = Import-Module (Join-Path $destinations[0] 'UpdateEverything.psd1') -Force -PassThru
+
+    Write-Host ''
+    Write-Host "Installed UpdateEverything $version" -ForegroundColor Green
+    if ($workingDirectory) { Write-Host "  Source   : $Repository ($Ref)" }
+    foreach ($destination in $destinations) {
+        Write-Host "  Location : $destination"
+    }
+    Write-Host "  Scope    : $Scope"
+    Write-Host "  Commands : $((Get-Command -Module UpdateEverything -CommandType Function).Name -join ', ')"
+    Write-Host ''
+    Write-Host '  Try it without changing anything:'
+    Write-Host '    Get-Help Update-Everything -Full'
+    Write-Host ''
+    Write-Host '  A cautious first run:'
+    Write-Host '    Update-Everything -IncludeWindowsUpdate $false -IncludePowerShell7 $false -SetPwshTerminalDefault $false'
+
+    if ($PassThru) { $installed }
+} finally {
+    if ($workingDirectory -and (Test-Path -LiteralPath $workingDirectory)) {
+        Remove-Item -LiteralPath $workingDirectory -Recurse -Force -ErrorAction SilentlyContinue
+    }
 }
-
-# Import by path so this reports on the copy just written, not on some other
-# version that happens to sit earlier in the module path.
-$installed = Import-Module (Join-Path $destinations[0] 'UpdateEverything.psd1') -Force -PassThru
-
-Write-Host ''
-Write-Host "Installed UpdateEverything $version" -ForegroundColor Green
-foreach ($destination in $destinations) {
-    Write-Host "  Location : $destination"
-}
-Write-Host "  Scope    : $Scope"
-Write-Host "  Commands : $((Get-Command -Module UpdateEverything -CommandType Function).Name -join ', ')"
-Write-Host ''
-Write-Host '  Try it without changing anything:'
-Write-Host '    Get-Help Update-Everything -Full'
-Write-Host ''
-Write-Host '  A cautious first run:'
-Write-Host '    Update-Everything -IncludeWindowsUpdate $false -IncludePowerShell7 $false -SetPwshTerminalDefault $false'
-
-if ($PassThru) { $installed }

@@ -70,6 +70,18 @@ Describe 'Read-TimedChoice' -Tag 'Unit','Prompt' {
     # The point of the whole function: PromptForChoice has no timeout, and a
     # scheduled run blocked on a question nobody is there to answer would sit
     # until the task's execution time limit killed it.
+    # The countdown redraw formatted a string inside a method call, where the
+    # comma binds as a second argument: Write("..." -f $a, $b) is
+    # Write(("..." -f $a), $b). .NET threw about the argument list, the catch
+    # reported it as an unreadable keypress, and the countdown never appeared.
+    It 'draws the countdown without warning' {
+        $warnings = @()
+        $null = Read-TimedChoice -Caption 'x' -Choice @('a', 'b') -TimeoutSeconds 3 -DefaultIndex 0 `
+            -WarningVariable warnings -WarningAction SilentlyContinue 6>$null
+
+        $warnings | Should-BeNull -Because "the countdown should draw cleanly: $($warnings -join '; ')"
+    }
+
     It 'gives up and takes the default rather than waiting forever' {
         $elapsed = Measure-Command {
             $script:answer = Read-TimedChoice -Caption 'x' -Choice @('a', 'b') `
@@ -92,7 +104,7 @@ Describe 'The countdown stays out of the run log' -Tag 'Static','Prompt' {
     # the countdown with Write-Host put one line per second into the log -- 52 of
     # them in a 276 line transcript on a 60 second prompt.
     It 'redraws the countdown with a raw console write' {
-        $script:Timed | Should-MatchString '\[Console\]::Write\("`rStarting in'
+        $script:Timed | Should-MatchString '\[Console\]::Write\(\("`rStarting in'
     }
 
     It 'does not redraw it with Write-Host' {

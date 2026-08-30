@@ -188,7 +188,11 @@
         [int]    $LogRetentionDays       = 30
     )
 
-    $isAdmin = Test-IsAdministrator
+    # $script:, not a plain local. As a script these lived at script scope and
+    # the private helpers read them as $script:. Inside a module a plain
+    # assignment is function-scoped, so Invoke-Step would read an unset
+    # $script:logDir and fail on every single step.
+    $script:isAdmin = Test-IsAdministrator
     if (-not $isAdmin -and -not $SkipElevation) {
         # Ask whether elevation is possible before asking for it. Without this the
         # script raises a UAC prompt a standard user can never satisfy, and reports
@@ -218,11 +222,11 @@
     # ---------------------------------------------------------------------------
     # 1. Logging
     # ---------------------------------------------------------------------------
-    $logDir = Get-UpdateLogDirectory
+    $script:logDir = Get-UpdateLogDirectory
 
     # One stamp shared by the transcript and every step log, so a single run's files
     # sort together and can be pruned as a unit.
-    $runStamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
+    $script:runStamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $mainLog  = Join-Path $logDir "Update-Everything-$runStamp.log"
 
     # Step logs used to be a fixed name appended to forever. They now rotate per run,
@@ -288,7 +292,7 @@
         $script:NotificationsAvailable = $notificationStatus.Available
     }
 
-    $Results = [System.Collections.Generic.List[object]]::new()
+    $script:Results = [System.Collections.Generic.List[object]]::new()
 
     # winget exit codes that mean "nothing to do" rather than "failed".
     #   0x8A15002B (-1978335189) APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
