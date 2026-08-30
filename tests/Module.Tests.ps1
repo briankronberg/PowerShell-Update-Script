@@ -717,6 +717,73 @@ Describe 'The relaunch imports a manifest, not a folder' -Tag 'Static','Module' 
     }
 }
 
+Describe 'The elevated relaunch runs a command that parses' -Tag 'Static','Module' {
+
+    # It did not. The command was built as
+    #
+    #     exit (Import-Module '...' -Force; Update-Everything).FailedCount
+    #
+    # and parentheses in PowerShell hold an expression, not a statement list, so
+    # that is "Missing closing ')' in expression". The elevated window opened,
+    # pwsh exited 1 without running a line, and closed again before anyone could
+    # read it -- no transcript, no error, nothing but an exit code. Every
+    # non-elevated run hit it, which is to say every ordinary first run.
+    #
+    # Neither existing relaunch test noticed, because both check what the string
+    # contains and neither asks whether it is valid PowerShell.
+
+    BeforeAll {
+        # The real function, with the launch mocked out. Building the string is
+        # the part under test; starting a process is not.
+        $script:Captured = & (Get-Module UpdateEverything) {
+            $captured = $null
+            $script:ModuleRoot = 'C:\Modules\UpdateEverything\1.0.0'
+
+            function Start-Process {
+                param(
+                    $FilePath, $Verb, $ArgumentList, [switch] $PassThru, [switch] $Wait, $ErrorAction
+                )
+                $script:seen = $ArgumentList
+                [pscustomobject]@{ ExitCode = 0 }
+            }
+
+            $null = Invoke-SelfElevation -BoundParameters ([ordered]@{
+                Notify               = [switch]::Present
+                IncludeWindowsUpdate = $false
+                AllowInstall         = @('PSWindowsUpdate', 'BurntToast')
+                PromptTimeoutSeconds = 90
+            }) 6>$null 3>$null
+
+            $script:seen
+        }
+
+        # The command line is not PowerShell; the string inside -Command is.
+        $script:Command = if ($script:Captured -match '-Command\s+"(.*)"\s*$') { $Matches[1] } else { $null }
+    }
+
+    It 'passes a -Command string to the elevated host' {
+        $script:Command | Should-NotBeNull
+    }
+
+    It 'builds a command with no parse errors' {
+        $errors = $null
+        $null = [System.Management.Automation.Language.Parser]::ParseInput(
+            $script:Command, [ref] $null, [ref] $errors)
+
+        $errors | Should-BeNull -Because "the elevated child exits 1 without running anything:`n$($errors.Message -join "`n")"
+    }
+
+    # The shape that parses: import as its own statement, then exit on the call
+    # alone. Get-UpdateTaskArgument has always built the task command this way.
+    It 'imports the module before the exit rather than inside it' {
+        $script:Command | Should-MatchString "^Import-Module '[^']+\.psd1' -Force; exit \("
+    }
+
+    It 'still hands the caller parameters to the elevated run' {
+        $script:Command | Should-MatchString ([regex]::Escape("-AllowInstall 'PSWindowsUpdate','BurntToast'"))
+    }
+}
+
 Describe 'Enter takes the default' -Tag 'Unit','Prompt' {
 
     BeforeAll {
