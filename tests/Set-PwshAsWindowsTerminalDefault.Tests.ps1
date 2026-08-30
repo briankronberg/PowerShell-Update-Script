@@ -9,7 +9,12 @@
 #>
 
 BeforeAll {
-    . (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1')
+    # Load the module's functions individually rather than importing the module,
+    # so tests can reach the private ones directly. $ModuleRoot is what
+    # Invoke-SelfElevation and the task builder hand to an elevated child.
+    $script:ModuleRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'src'
+    Get-ChildItem "$script:ModuleRoot\Private\*.ps1", "$script:ModuleRoot\Public\*.ps1" |
+        ForEach-Object { . $_.FullName }
 
     $script:RealLocalAppData = $env:LOCALAPPDATA
     $script:PwshGuid = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'

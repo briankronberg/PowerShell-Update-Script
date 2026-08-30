@@ -8,8 +8,12 @@
 #>
 
 BeforeAll {
-    . (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1')
-    . (Join-Path (Split-Path $PSScriptRoot -Parent) 'Register-UpdateTask.ps1')
+    # Load the module's functions individually rather than importing the module,
+    # so tests can reach the private ones directly. $ModuleRoot is what
+    # Invoke-SelfElevation and the task builder hand to an elevated child.
+    $script:ModuleRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'src'
+    Get-ChildItem "$script:ModuleRoot\Private\*.ps1", "$script:ModuleRoot\Public\*.ps1" |
+        ForEach-Object { . $_.FullName }
 }
 
 Describe 'Request-RunDecision' -Tag 'Unit','Prompt' {
@@ -80,7 +84,7 @@ Describe 'Read-TimedChoice' -Tag 'Unit','Prompt' {
 Describe 'The countdown stays out of the run log' -Tag 'Static','Prompt' {
 
     BeforeAll {
-        $script:Source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1') -Raw
+        $script:Source = (Get-ChildItem (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public'), (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private') -Filter *.ps1 | Get-Content -Raw) -join "`n`n"
         $script:Timed = [regex]::Match($script:Source, '(?s)function Read-TimedChoice.*?\n\}').Value
     }
 
@@ -135,41 +139,41 @@ Describe 'Resolve-WindowStyle' -Tag 'Unit','Prompt' {
 Describe 'Get-UpdateTaskArgument window and prompt options' -Tag 'Unit','Prompt' {
 
     It 'says nothing about window style for a normal run' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' | Should-NotMatchString '-WindowStyle'
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-NotMatchString '-WindowStyle'
     }
 
     It 'passes -WindowStyle <_> through' -ForEach @('Hidden', 'Minimized') {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' -WindowStyle $_ |
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -WindowStyle $_ |
             Should-MatchString "-WindowStyle $_"
     }
 
-    # -WindowStyle is an argument to pwsh, not to the script. After -File it
-    # would be handed to the script, which has no such parameter.
-    It 'puts -WindowStyle before -File, where the host will read it' {
-        $arguments = Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' -WindowStyle Hidden
+    # -WindowStyle is an argument to pwsh, not to the module. After -Command it
+    # would be swallowed by the command string.
+    It 'puts -WindowStyle before -Command, where the host will read it' {
+        $arguments = Get-UpdateTaskArgument -ModuleRoot 'C:\x' -WindowStyle Hidden
 
-        $arguments.IndexOf('-WindowStyle') | Should-BeLessThan $arguments.IndexOf('-File')
+        $arguments.IndexOf('-WindowStyle') | Should-BeLessThan $arguments.IndexOf('-Command')
     }
 
     It 'passes -PromptBeforeRun through' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' -PromptBeforeRun |
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -PromptBeforeRun |
             Should-MatchString '-PromptBeforeRun'
     }
 
     It 'carries the prompt timeout with it' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' -PromptBeforeRun -PromptTimeoutSeconds 30 |
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -PromptBeforeRun -PromptTimeoutSeconds 30 |
             Should-MatchString '-PromptTimeoutSeconds 30'
     }
 
     It 'omits the prompt entirely when it is not wanted' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' | Should-NotMatchString '-PromptBeforeRun'
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-NotMatchString '-PromptBeforeRun'
     }
 }
 
 Describe 'The prompt cannot hang a run' -Tag 'Static','Prompt' {
 
     BeforeAll {
-        $script:Source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1') -Raw
+        $script:Source = (Get-ChildItem (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public'), (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private') -Filter *.ps1 | Get-Content -Raw) -join "`n`n"
     }
 
     # A hidden window or redirected input cannot answer. Starting anyway beats
@@ -178,9 +182,10 @@ Describe 'The prompt cannot hang a run' -Tag 'Static','Prompt' {
         $script:Source | Should-MatchString '(?s)if \(\$PromptBeforeRun\).{0,200}Test-CanPrompt'
     }
 
-    It 'skips cleanly rather than reporting a failure' {
-        # Choosing not to run is a decision, not a fault, so it must not land in
-        # the exit code.
-        $script:Source | Should-MatchString "(?s)'Skip'.{0,400}exit 0"
+    # Choosing not to run is a decision, not a fault, so it must not land in
+    # FailedCount. As a module it returns a result rather than exiting, which
+    # would have taken the caller's session with it.
+    It 'skips by returning a result, not by exiting' {
+        $script:Source | Should-MatchString "(?s)'Skip'.{0,500}New-UpdateEverythingResult -Ran \`$false"
     }
 }

@@ -15,8 +15,12 @@
 #>
 
 BeforeAll {
-    $script:ScriptPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1'
-    . $script:ScriptPath
+    # Load the module's functions individually rather than importing the module,
+    # so tests can reach the private ones directly. $ModuleRoot is what
+    # Invoke-SelfElevation and the task builder hand to an elevated child.
+    $script:ModuleRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'src'
+    Get-ChildItem "$script:ModuleRoot\Private\*.ps1", "$script:ModuleRoot\Public\*.ps1" |
+        ForEach-Object { . $_.FullName }
 }
 
 Describe 'Remove-JsonComment' -Tag 'Unit' {
@@ -206,7 +210,7 @@ Describe 'Test-PendingReboot' -Tag 'Unit' {
     # in the run log even though it is caught. On a healthy machine that reads
     # like a fault. Read the key, then look for the value.
     It 'does not ask the registry for a value that may not exist' {
-        $source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1') -Raw
+        $source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Test-PendingReboot.ps1') -Raw
         $probe = [regex]::Match($source, '(?s)function Test-PendingReboot.*?
 \}').Value
 

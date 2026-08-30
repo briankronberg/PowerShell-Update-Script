@@ -15,8 +15,12 @@ BeforeDiscovery {
 }
 
 BeforeAll {
-    $script:ScriptPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'Register-UpdateTask.ps1'
-    . $script:ScriptPath
+    # Load the module's functions individually rather than importing the module,
+    # so tests can reach the private ones directly. $ModuleRoot is what
+    # Invoke-SelfElevation and the task builder hand to an elevated child.
+    $script:ModuleRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'src'
+    Get-ChildItem "$script:ModuleRoot\Private\*.ps1", "$script:ModuleRoot\Public\*.ps1" |
+        ForEach-Object { . $_.FullName }
 }
 
 Describe 'Get-NthDayOfWeek' -Tag 'Unit' {
@@ -248,30 +252,49 @@ Describe 'Random start delay' -Tag 'Unit' {
 
 Describe 'Get-UpdateTaskArgument' -Tag 'Unit' {
 
-    It 'quotes the script path so spaces survive' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\Program Files\x\Update-Everything.ps1' |
-            Should-MatchString ([regex]::Escape('"C:\Program Files\x\Update-Everything.ps1"'))
+    # The task imports the module and turns the returned object into an exit
+    # code. Only an exit code crosses a process boundary, and Task Scheduler
+    # records it as the last run result.
+
+    It 'imports the module by path, not by name' {
+        # A task runs in its own session, which may resolve a different copy of
+        # the module or none at all when it is installed for the current user.
+        Get-UpdateTaskArgument -ModuleRoot 'C:\Program Files\x\UpdateEverything' |
+            Should-MatchString ([regex]::Escape("Import-Module 'C:\Program Files\x\UpdateEverything'"))
+    }
+
+    It 'turns the result object into an exit code' {
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' |
+            Should-MatchString ([regex]::Escape('exit (Update-Everything'))
+    }
+
+    It 'uses FailedCount for that exit code' {
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-MatchString ([regex]::Escape(').FailedCount'))
     }
 
     It 'bypasses execution policy, so the task does not depend on machine policy' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' | Should-MatchString '-ExecutionPolicy Bypass'
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-MatchString '-ExecutionPolicy Bypass'
     }
 
     It 'skips the user profile' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' | Should-MatchString '-NoProfile'
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-MatchString '-NoProfile'
     }
 
     It 'asks for notifications by default' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' | Should-MatchString '-Notify'
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-MatchString '-Notify'
     }
 
     It 'omits notifications when they are turned off' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' -Notify $false |
-            Should-NotMatchString '-Notify'
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -Notify $false | Should-NotMatchString '-Notify'
+    }
+
+    It 'quotes each approval so the child parses them as a list' {
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -AllowInstall 'PSWindowsUpdate', 'BurntToast' |
+            Should-MatchString ([regex]::Escape("-AllowInstall 'PSWindowsUpdate','BurntToast'"))
     }
 
     It 'appends extra arguments' {
-        Get-UpdateTaskArgument -ScriptPath 'C:\x.ps1' -ExtraArgument '-IncludeWindowsUpdate', '$false' |
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -ExtraArgument '-IncludeWindowsUpdate', '$false' |
             Should-MatchString ([regex]::Escape('-IncludeWindowsUpdate $false'))
     }
 }
@@ -297,7 +320,7 @@ Describe 'Get-CadenceDescription' -Tag 'Unit' {
 Describe 'Registration safety' -Tag 'Static' {
 
     BeforeAll {
-        $script:Source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Register-UpdateTask.ps1') -Raw
+        $script:Source = (Get-ChildItem (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public'), (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private') -Filter *.ps1 | Get-Content -Raw) -join "`n`n"
         $script:Ast = [System.Management.Automation.Language.Parser]::ParseInput(
             $script:Source, [ref] $null, [ref] $null)
     }

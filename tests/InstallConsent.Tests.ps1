@@ -19,7 +19,12 @@
 #>
 
 BeforeAll {
-    . (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1')
+    # Load the module's functions individually rather than importing the module,
+    # so tests can reach the private ones directly. $ModuleRoot is what
+    # Invoke-SelfElevation and the task builder hand to an elevated child.
+    $script:ModuleRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'src'
+    Get-ChildItem "$script:ModuleRoot\Private\*.ps1", "$script:ModuleRoot\Public\*.ps1" |
+        ForEach-Object { . $_.FullName }
 }
 
 Describe 'Approve-Install' -Tag 'Unit','Consent' {
@@ -186,7 +191,7 @@ Describe 'A step that declines an install' -Tag 'Unit','Consent' {
 Describe 'Every install site is gated' -Tag 'Static','Consent' {
 
     BeforeAll {
-        $script:Source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1') -Raw
+        $script:Source = (Get-ChildItem (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public'), (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private') -Filter *.ps1 | Get-Content -Raw) -join "`n`n"
         $script:Ast = [System.Management.Automation.Language.Parser]::ParseInput(
             $script:Source, [ref] $null, [ref] $null)
 

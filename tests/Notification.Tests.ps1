@@ -14,7 +14,12 @@
 #>
 
 BeforeAll {
-    . (Join-Path (Split-Path $PSScriptRoot -Parent) 'Update-Everything.ps1')
+    # Load the module's functions individually rather than importing the module,
+    # so tests can reach the private ones directly. $ModuleRoot is what
+    # Invoke-SelfElevation and the task builder hand to an elevated child.
+    $script:ModuleRoot = Join-Path (Split-Path $PSScriptRoot -Parent) 'src'
+    Get-ChildItem "$script:ModuleRoot\Private\*.ps1", "$script:ModuleRoot\Public\*.ps1" |
+        ForEach-Object { . $_.FullName }
 
     # Stand-in for the real cmdlet. Pester cannot mock a command that does not
     # exist, and BurntToast is deliberately not a hard dependency.
