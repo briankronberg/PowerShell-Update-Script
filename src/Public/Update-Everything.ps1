@@ -99,6 +99,10 @@
           PSWindowsUpdate  install the PSWindowsUpdate module (AllUsers scope)
           NuGetProvider    install the NuGet package provider (CurrentUser)
           BurntToast       install the BurntToast module for -Notify (CurrentUser)
+          PowerShellGet    replace the PowerShellGet 1.0.0.1 Windows ships with
+                           2.x, which can accept module licenses and can see
+                           modules installed by newer versions (AllUsers when
+                           elevated, otherwise CurrentUser)
 
         A scheduled task cannot prompt, so pass the approvals it should have:
             -AllowInstall PSWindowsUpdate,BurntToast
@@ -184,7 +188,7 @@
         [ValidateRange(1, 1440)]
         [int]    $DelayMinutes            = 60,
         [switch] $Notify,
-        [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast')]
+        [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet')]
         [string[]] $AllowInstall = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30
@@ -494,6 +498,37 @@
                 Write-Output 'PSGallery (PowerShellGet v2) set to Trusted.'
             } else {
                 Write-Output 'PSGallery (PowerShellGet v2) already Trusted.'
+            }
+        }
+
+        # Windows PowerShell ships PowerShellGet 1.0.0.1 and never updates it.
+        # Test-ParameterSupport keeps that version from failing the module step
+        # outright, but it cannot fix the deeper problem: v1 does not see modules
+        # installed by v2, so Update-Module on 5.1 quietly skips most of what is
+        # actually installed. Offer the upgrade rather than assuming it.
+        #
+        # Declining is not fatal here, unlike the NuGet provider above: trust has
+        # already been set, and the module step still runs on v1.
+        # Indexed rather than "| Select-Object -First 1": that halts the upstream
+        # pipeline, and inside a step action the transcript records the stop as a
+        # TerminatingError.
+        $psgetAll = @(Get-Module PowerShellGet -ListAvailable | Sort-Object Version -Descending)
+        $psget    = if ($psgetAll.Count) { $psgetAll[0] } else { $null }
+
+        if ($psget -and $psget.Version -lt [version]'2.0.0') {
+            Write-Output "PowerShellGet $($psget.Version) is the version Windows ships."
+
+            # This step is not admin-gated, and -Scope AllUsers fails without
+            # elevation, so the scope follows what the run actually has.
+            $scope = if ($isAdmin) { 'AllUsers' } else { 'CurrentUser' }
+            $where = if ($isAdmin) { 'for all users on this machine' } else { 'for the current user only' }
+
+            if (Approve-Install -Component 'PowerShellGet' -Approved $AllowInstall `
+                    -Description "PowerShellGet $($psget.Version) cannot accept module licenses and does not see modules installed by newer versions, so module updates on this host will miss most of what is installed. This would install PowerShellGet 2.x from the PowerShell Gallery $where.") {
+
+                Install-Module PowerShellGet -Force -AllowClobber -Scope $scope `
+                    -Confirm:$false -ErrorAction Stop
+                Write-Output "Installed PowerShellGet 2.x ($scope). It takes effect in the next session; this run continues on the version already loaded."
             }
         }
     }

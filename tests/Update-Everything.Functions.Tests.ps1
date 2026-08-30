@@ -643,6 +643,48 @@ Describe 'Test-PackagedProcess' -Tag 'Unit','Security' {
     }
 }
 
+Describe 'The PowerShellGet upgrade offer' -Tag 'Static' {
+
+    # PowerShellGet 1.0.0.1 is what Windows ships and it never updates itself.
+    # Test-ParameterSupport stops it failing the module step, but it cannot fix
+    # the deeper problem: v1 does not see modules installed by v2, so
+    # Update-Module on 5.1 quietly skips most of what is actually installed.
+
+    BeforeAll {
+        $script:MainSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    It 'is gated behind the same consent prompt as every other install' {
+        $script:MainSource | Should-MatchString "Approve-Install -Component 'PowerShellGet'"
+    }
+
+    It 'only fires when the installed version predates 2.0' {
+        $script:MainSource | Should-MatchString "\`$psget\.Version -lt \[version\]'2\.0\.0'"
+    }
+
+    # The Trust PSGallery step carries no -RequiresAdmin, and -Scope AllUsers
+    # fails without elevation, so an unelevated run has to fall back rather than
+    # throw in a step that was working fine before.
+    It 'installs to AllUsers only when the run is elevated' {
+        $script:MainSource | Should-MatchString "if \(\`$isAdmin\) \{ 'AllUsers' \} else \{ 'CurrentUser' \}"
+    }
+
+    # Declining is not fatal here: trust is already set and the module step still
+    # runs on v1, unlike the NuGet provider which the step cannot work without.
+    It 'does not abort the step when the offer is declined' {
+        $script:MainSource | Should-NotMatchString "PowerShellGet'[\s\S]{0,400}Stop-StepAsSkipped"
+    }
+
+    It 'is accepted by -AllowInstall on both entry points' -ForEach @(
+        'src\Public\Update-Everything.ps1'
+        'src\Public\Register-UpdateEverythingTask.ps1'
+    ) {
+        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) $_) -Raw |
+            Should-MatchString "ValidateSet\('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet'\)"
+    }
+}
+
 Describe 'Test-UacEnabled' -Tag 'Unit','Security' {
 
     It 'reports enabled when EnableLUA is 1' {

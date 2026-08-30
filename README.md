@@ -147,7 +147,7 @@ thing that crosses a process boundary.
 | `-PromptTimeoutSeconds` | `60` | How long that prompt waits before starting anyway. |
 | `-DelayMinutes` | `60` | How long the "wait, then run" answer waits. |
 | `-Notify` | off | Show a toast when the run finishes, plus an urgent one if a restart is needed. Intended for scheduled runs. |
-| `-AllowInstall` | *(none)* | Which missing components may be installed: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`. |
+| `-AllowInstall` | *(none)* | Which missing components may be installed: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`, `PowerShellGet`. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
 
 ## Channels covered
@@ -199,6 +199,7 @@ that was never there does, and the module will not do it silently.
 | `PSWindowsUpdate` | The PSWindowsUpdate module | **all users** | `-IncludeWindowsUpdate` |
 | `NuGetProvider` | The NuGet package provider | current user | reaching the PowerShell Gallery |
 | `BurntToast` | The BurntToast module | current user | `-Notify` |
+| `PowerShellGet` | PowerShellGet 2.x, replacing the 1.0.0.1 Windows ships | **all users** when elevated, else current user | module updates that see everything installed |
 
 Without `-AllowInstall`, an interactive run asks before each one and defaults to
 *No*. A non-interactive run never prompts and never installs. There is nobody to

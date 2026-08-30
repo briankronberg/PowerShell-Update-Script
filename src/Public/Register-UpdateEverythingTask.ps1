@@ -64,7 +64,7 @@
         Approvals to pass through for first-time installs. A scheduled run cannot
         prompt, so anything not approved here is declined and its step reported
         as skipped. Accepts All, PowerShell7, PSWindowsUpdate, NuGetProvider,
-        BurntToast.
+        BurntToast, PowerShellGet.
 
     .PARAMETER WindowStyle
         How the run's console window appears: Normal (default), Minimized or
@@ -129,7 +129,7 @@
 
         [bool] $Notify = $true,
 
-        [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast')]
+        [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet')]
         [string[]] $AllowInstall = @(),
 
         [ValidateSet('Normal', 'Minimized', 'Hidden')]
