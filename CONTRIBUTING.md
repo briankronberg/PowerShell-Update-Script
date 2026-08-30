@@ -106,6 +106,151 @@ file lock, and the reassuring text hid it for several runs.
 If a failure has a known benign cause, match the actual error text for it and
 say which one you matched.
 
+## House style
+
+General PowerShell practice, adopted here. Most of it this codebase already
+followed; the interesting part is the three rules it deliberately does not, and
+why. Where a rule below is enforced by a test or the analyzer, that is said —
+the rest are read by eye at review.
+
+### Adopted as written
+
+**No aliases.** `Get-ChildItem`, not `dir` or `gci`. `Where-Object`, not
+`where` or `?`. Aliases can be redefined, differ between editions, and read as
+noise to anyone who has not memorised them. *Enforced:* PSScriptAnalyzer flags
+`PSAvoidUsingCmdletAliases` under both this repository's settings and the
+default rules.
+
+**Approved verbs, in `Verb-Noun` form.** Check with `Get-Verb` before inventing
+one. *Enforced:* `PSUseApprovedVerbs`.
+
+**Splat past three parameters.** A hash table splat reads down the page instead
+of across it, and diffs one line per change rather than rewriting a backtick
+continuation. `Register-ScheduledTask` and `Install-Module` are already called
+this way.
+
+**Declare parameter types.** `[string]`, `[int]`, `[switch]`, `[string[]]`.
+`ValidateSet` and `ValidateRange` where the set is closed, so a typo is an
+error at bind time rather than a silent full run — `-Tag Pyhton` matching
+nothing is the failure this prevents.
+
+**Return objects, not text.** `[pscustomobject]` with named properties, so a
+caller can filter and sort without parsing. `New-UpdateEverythingResult` is the
+example; it derives its counts from the step records so the two cannot
+disagree.
+
+**Comment-based help on every public function**, with `.SYNOPSIS`,
+`.DESCRIPTION`, `.PARAMETER` for each parameter, and at least one `.EXAMPLE`.
+*Enforced:* a test asserts every parameter is documented, and that nothing is
+documented that no longer exists.
+
+### Adopted with a documented exception
+
+These three are good general advice and wrong for parts of this module. The
+exceptions are narrow, and each has a reason that cost something to learn.
+
+**`$ErrorActionPreference = 'Stop'` — scripts yes, the module never.** See
+[ErrorAction](#erroraction). Setting it inside a module changes the caller's
+session, which is not the module's to change. `Install.ps1`, `Publish.ps1` and
+`test.ps1` do set it, because they own their session. The pre-PR checklist
+rejects it in `src`.
+
+**`Set-StrictMode -Version Latest` — not in the module.** It makes reading a
+missing property fatal, and the module has to probe for optional keys in
+Windows Terminal's `settings.json`, where they are frequently absent. Turning
+it on would break the path it exists to handle. A test recovers the useful half
+instead, walking the AST and failing if a function reads a variable it never
+assigns.
+
+**`Write-Host` — never for data, and never inside a step action.** The general
+rule is right about data: anything a caller might consume goes to the pipeline.
+But this is a console maintenance tool whose progress is watched by a person,
+and colour separates a failure from noise, so the summary uses `Write-Host`
+deliberately and says so in a `SuppressMessageAttribute`.
+
+The sharper rule is about *where*. Inside an `Invoke-Step` action, `*>&1`
+merges the information stream into the pipeline, so on Windows PowerShell every
+`Write-Host` line is written once to the console and rendered again by
+`Out-Default` — measured at two occurrences in the transcript, one wrapped to
+console width and one not. Helpers called from a step use `Write-Output`;
+`Update-Everything`'s own summary, which is not inside a step, uses
+`Write-Host`. *Enforced:* a test asserts the Terminal helper contains no
+`Write-Host` call.
+
+`Write-Verbose`, `Write-Warning` and `Write-Error` are for the streams they
+name, in either case.
+
+### Error boundaries
+
+`try`/`catch` around the call whose failure matters, with `-ErrorAction Stop`
+on that call — not a blanket preference. The step runner is the outer boundary:
+`Invoke-Step` catches per step, records the outcome, and lets the run continue,
+because one dead package manager must not stop the other twelve. An empty
+`catch {}` is rejected; every catch says what it swallowed through
+`Write-Verbose`.
+
+### The template
+
+A public function looks like this. `begin`/`process`/`end` are for functions
+that genuinely accept pipeline input — most here do not, and an empty
+`process` block around a single call is noise.
+
+```powershell
+<#
+    .SYNOPSIS
+    One line, in the imperative.
+
+    .DESCRIPTION
+    What it does, what it assumes, and why it is shaped this way. This is where
+    a decision that cost an afternoon gets written down.
+
+    .PARAMETER Name
+    What it selects, and what happens when it is omitted.
+
+    .EXAMPLE
+    Get-Thing -Name 'widget'
+#>
+function Get-Thing {
+    [CmdletBinding()]
+    [OutputType([pscustomobject])]
+    param(
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $Name
+    )
+
+    try {
+        $raw = Get-Content -LiteralPath $Name -Raw -ErrorAction Stop
+    } catch {
+        # The inner exception, not a generic message: "could not read the file"
+        # sends someone looking in the wrong place.
+        throw "Could not read '$Name': $($_.Exception.Message)"
+    }
+
+    [pscustomobject]@{
+        Name   = $Name
+        Length = $raw.Length
+    }
+}
+```
+
+Note `Mandatory` with no value rather than `Mandatory = $true`. Both work;
+`Mandatory = true` does not — an unquoted bareword there is a parse error, and
+the function will not load at all.
+
+### Before writing
+
+1. **Say what it changes.** If it writes to the registry, installs software,
+   registers a task or can reboot, say so before the code. Anything that
+   installs needs the consent gate; see [Updating is not
+   installing](#updating-is-not-installing).
+2. **Write the parameter block and the help first.** They are the contract, and
+   the suite checks both directions of it.
+3. **Then the body**, commented where the reason is not obvious from the code.
+4. **Say how it was validated.** Which tests, run how, and — for anything that
+   cannot be unit tested — what was measured and on which edition. "Measured on
+   5.1: two occurrences before, one after" belongs in the commit message.
+
 ## Windows PowerShell 5.1 is a supported target
 
 Not an afterthought. The module declares `CompatiblePSEditions = Desktop, Core`
