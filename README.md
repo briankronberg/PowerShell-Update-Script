@@ -7,7 +7,38 @@ and tell you what happened with a toast notification.
 
 ## Install
 
-From a clone:
+Nothing but the URL is needed. This downloads the installer, which then fetches
+the module from GitHub:
+
+```powershell
+$installer = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'
+```
+
+```powershell
+Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/PowerShell-Update-Script/main/Install.ps1 -OutFile $installer -UseBasicParsing
+```
+
+```powershell
+Unblock-File $installer
+```
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File $installer
+```
+
+It installs into your own module path, which needs no elevation, and prints what
+it exported. Add `-Scope AllUsers` to install machine-wide, which does need
+elevation.
+
+Three details in those four lines are worth the space. `Unblock-File` clears the
+mark of the web that Windows puts on a download, which an execution policy of
+`RemoteSigned` would otherwise refuse. `-ExecutionPolicy Bypass` covers the
+stricter `AllSigned`. And the file is downloaded and then run, rather than piped
+through `Invoke-Expression`: the shorter `irm ... | iex` idiom is blocked by
+Defender's attack surface reduction, which refuses to create a process whose
+command line contains it regardless of what the command does.
+
+From a clone instead:
 
 ```powershell
 git clone https://github.com/briankronberg/PowerShell-Update-Script.git
@@ -17,9 +48,8 @@ git clone https://github.com/briankronberg/PowerShell-Update-Script.git
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\PowerShell-Update-Script\Install.ps1
 ```
 
-That copies the module into your own module path, which needs no elevation, and
-prints what it exported. Add `-Scope AllUsers` to install machine-wide, which
-does need elevation.
+Add `-FromGitHub` to install what is published rather than what is in the
+working copy.
 
 To load it without installing, point `Import-Module` at the source:
 

@@ -12,10 +12,18 @@
         # from a clone
         pwsh -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
 
-        # from nothing but this file
+        # from nothing but the URL
         $installer = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'
-        Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/PowerShell-Update-Script/main/Install.ps1 -OutFile $installer
-        & $installer
+        Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/PowerShell-Update-Script/main/Install.ps1 -OutFile $installer -UseBasicParsing
+        Unblock-File $installer
+        pwsh -NoProfile -ExecutionPolicy Bypass -File $installer
+
+    Downloaded, then run, rather than piped through Invoke-Expression. The
+    "irm ... | iex" idiom reads shorter but Defender blocks process creation on
+    a command line containing it, whatever the command actually does, so it
+    fails outright on a machine with attack surface reduction turned on.
+    Unblock-File clears the mark of the web, which an execution policy of
+    RemoteSigned would otherwise refuse.
 
     Installs for the current user by default, which needs no elevation, and for
     both PowerShell editions, because they read different module folders.
@@ -118,11 +126,15 @@ function Get-ModuleSourceFromGitHub {
 }
 
 $workingDirectory = $null
-$source = Join-Path $PSScriptRoot 'src'
+
+# $PSScriptRoot is empty when this is piped into Invoke-Expression rather than
+# run from a file, which is how the one-line install works. Join-Path would
+# throw on the empty path, so there is nothing local to look at in that case.
+$source = if ($PSScriptRoot) { Join-Path $PSScriptRoot 'src' } else { $null }
 
 # Run on its own, with no clone around it, this fetches the module rather than
 # failing. That is what makes the one-line install work.
-if ($FromGitHub -or -not (Test-Path -LiteralPath (Join-Path $source 'UpdateEverything.psd1'))) {
+if ($FromGitHub -or -not $source -or -not (Test-Path -LiteralPath (Join-Path $source 'UpdateEverything.psd1'))) {
     $workingDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('UpdateEverything-' + [guid]::NewGuid().ToString('N'))
     $null = New-Item -ItemType Directory -Path $workingDirectory
     $source = Get-ModuleSourceFromGitHub -Repository $Repository -Ref $Ref -WorkingDirectory $workingDirectory
