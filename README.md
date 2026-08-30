@@ -7,36 +7,45 @@ and tell you what happened with a toast notification.
 
 ## Install
 
-Nothing but the URL is needed. This downloads the installer, which then fetches
-the module from GitHub:
+Nothing but the URL is needed. Paste this into PowerShell:
 
 ```powershell
-$installer = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'
+$i = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'; Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/PowerShell-Update-Script/main/Install.ps1 -OutFile $i -UseBasicParsing; Unblock-File $i; pwsh -NoProfile -ExecutionPolicy Bypass -File $i
 ```
+
+It downloads the installer, which fetches the module from GitHub and installs it
+into your own module path. No elevation, and it prints what it exported. Add
+`-Force` to overwrite an existing install, or `-Scope AllUsers` to install
+machine-wide, which does need elevation.
+
+Then:
 
 ```powershell
-Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/PowerShell-Update-Script/main/Install.ps1 -OutFile $installer -UseBasicParsing
+Import-Module UpdateEverything
 ```
 
-```powershell
-Unblock-File $installer
+### Why that command is shaped the way it is
+
+It is one line so it survives a copy and paste, but each piece is load-bearing.
+
+`Unblock-File` clears the mark of the web that Windows puts on a download, which
+an execution policy of `RemoteSigned` would otherwise refuse. `-ExecutionPolicy
+Bypass` covers the stricter `AllSigned`, and applies to that one process only.
+
+The file is downloaded and then run, rather than piped through
+`Invoke-Expression`. The shorter `irm ... | iex` idiom is widely published and
+does not work on a machine with Defender's attack surface reduction turned on,
+because the block is on the command line text rather than on what the command
+does:
+
+```
+pwsh -Command '"harmless"'                          runs
+pwsh -Command 'irm https://example.com | Out-Null'  runs
+pwsh -Command '$x = "irm" + " | iex"; "ok"'         Access is denied
 ```
 
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File $installer
-```
-
-It installs into your own module path, which needs no elevation, and prints what
-it exported. Add `-Scope AllUsers` to install machine-wide, which does need
-elevation.
-
-Three details in those four lines are worth the space. `Unblock-File` clears the
-mark of the web that Windows puts on a download, which an execution policy of
-`RemoteSigned` would otherwise refuse. `-ExecutionPolicy Bypass` covers the
-stricter `AllSigned`. And the file is downloaded and then run, rather than piped
-through `Invoke-Expression`: the shorter `irm ... | iex` idiom is blocked by
-Defender's attack surface reduction, which refuses to create a process whose
-command line contains it regardless of what the command does.
+The last one only builds a string, and Windows still refuses to create the
+process.
 
 From a clone instead:
 
