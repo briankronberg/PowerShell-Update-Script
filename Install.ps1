@@ -10,13 +10,13 @@
     installs from the clone it sits in when there is one. So both of these work:
 
         # from a clone
-        powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1
+        powershell -NoProfile -ExecutionPolicy Bypass -File .\Install.ps1 -Force
 
         # from nothing but the URL
         $installer = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'
         Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1 -OutFile $installer -UseBasicParsing
         Unblock-File $installer
-        powershell -NoProfile -ExecutionPolicy Bypass -File $installer
+        powershell -NoProfile -ExecutionPolicy Bypass -File $installer -Force
 
     Downloaded, then run, rather than piped through Invoke-Expression. The
     "irm ... | iex" idiom reads shorter but Defender blocks process creation on
