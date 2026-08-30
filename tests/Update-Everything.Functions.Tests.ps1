@@ -247,7 +247,88 @@ Describe 'Test-PendingReboot' -Tag 'Unit' {
                 '\??\C:\Windows\System32\thing.dll', '!\??\C:\Windows\System32\thing.dll') }
         } -ParameterFilter { $LiteralPath -like '*Session Manager' }
 
-        (Test-PendingReboot).Reasons | Should-ContainCollection 'Pending file renames (1)'
+        (Test-PendingReboot).Reasons | Should-ContainCollection 'Pending file renames (1): C:\Windows\System32\thing.dll'
+    }
+
+    # "Pending file renames (1)" on its own sent someone through the event log,
+    # the servicing keys and the Office update state to work out what a restart
+    # was for, and by then the answer was gone: the queue is consumed at boot
+    # and nothing else records it. The path is the answer.
+    It 'names the file a restart is waiting on' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(
+                '\??\C:\Windows\System32\drivers\thing.sys', '!\??\C:\Windows\System32\drivers\thing.sys') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).Reasons |
+            Should-ContainCollection 'Pending file renames (1): C:\Windows\System32\drivers\thing.sys'
+    }
+
+    # The sources carry NT object-manager syntax and MoveFileEx markers. Left in,
+    # the reason reads as machine noise rather than a path.
+    It 'strips the <_> prefix from the reported path' -ForEach @('\??\', '*1\??\', '!\??\') {
+        $prefix = $_
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(
+                ($prefix + 'C:\dir\file.dll'), '!\??\C:\dir\file.dll') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).Reasons | Should-ContainCollection 'Pending file renames (1): C:\dir\file.dll'
+    }
+
+    # The summary prints a line per reason and the toast joins the first two, so
+    # a machine mid-servicing must not turn either into a wall of text.
+    It 'lists at most three paths' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(
+                '\??\C:\a.dll', '!\??\C:\a.dll',
+                '\??\C:\b.dll', '!\??\C:\b.dll',
+                '\??\C:\c.dll', '!\??\C:\c.dll',
+                '\??\C:\d.dll', '!\??\C:\d.dll',
+                '\??\C:\e.dll', '!\??\C:\e.dll') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).Reasons |
+            Should-ContainCollection 'Pending file renames (5): C:\a.dll; C:\b.dll; C:\c.dll; and 2 more'
+    }
+
+    # The count is the total, not the number of paths shown. Asserting only
+    # "renames (4)" would pass against the version that reported a bare count
+    # and no paths at all, so this pins the whole reason.
+    It 'counts every rename even though it shows three' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(
+                '\??\C:\a.dll', '!\??\C:\a.dll',
+                '\??\C:\b.dll', '!\??\C:\b.dll',
+                '\??\C:\c.dll', '!\??\C:\c.dll',
+                '\??\C:\d.dll', '!\??\C:\d.dll') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).Reasons |
+            Should-ContainCollection 'Pending file renames (4): C:\a.dll; C:\b.dll; C:\c.dll; and 1 more'
+    }
+
+    # A path long enough to wrap the summary is trimmed from the left, because
+    # the file name is the end and that is the part that identifies it.
+    It 'trims a long path from the left, keeping the file name' {
+        $long = 'C:\Program Files\Some Vendor\A Very Long Product Name Indeed\subfolder\deeper\thing.dll'
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(('\??\' + $long), '!\??\x') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).Reasons | Should-MatchString 'thing\.dll$'
+    }
+
+    # Measuring the trimmed length is not enough on its own: with no path in the
+    # reason at all, the measurement lands on "Pending file renames (1)" and
+    # passes. The ellipsis is what proves a path was there and was trimmed.
+    It 'marks a trimmed path with a leading ellipsis' {
+        $long = 'C:\Program Files\Some Vendor\A Very Long Product Name Indeed\subfolder\deeper\thing.dll'
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ PendingFileRenameOperations = @(('\??\' + $long), '!\??\x') }
+        } -ParameterFilter { $LiteralPath -like '*Session Manager' }
+
+        (Test-PendingReboot).Reasons | Should-MatchString 'renames \(1\): \.\.\.'
     }
 
     # A trailing source with no partner is malformed. Inventing a rename out of
