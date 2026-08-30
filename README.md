@@ -10,7 +10,7 @@ and tell you what happened with a toast notification.
 Nothing but the URL is needed. Paste this into PowerShell:
 
 ```powershell
-$i = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'; Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1 -OutFile $i -UseBasicParsing; Unblock-File $i; pwsh -NoProfile -ExecutionPolicy Bypass -File $i
+$i = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'; Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1 -OutFile $i -UseBasicParsing; Unblock-File $i; powershell -NoProfile -ExecutionPolicy Bypass -File $i
 ```
 
 It downloads the installer, which fetches the module from GitHub and installs it
@@ -54,7 +54,7 @@ git clone https://github.com/briankronberg/UpdateEverything.git
 ```
 
 ```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File .\UpdateEverything\Install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\UpdateEverything\Install.ps1
 ```
 
 Add `-FromGitHub` to install what is published rather than what is in the
