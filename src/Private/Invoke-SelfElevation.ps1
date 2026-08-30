@@ -96,7 +96,9 @@
         $child = Start-Process -FilePath $hostPath -Verb RunAs -ArgumentList $argList `
             -PassThru -Wait -ErrorAction Stop
 
-        Write-Host "Elevated run finished with exit code $($child.ExitCode)." -ForegroundColor Green
+        # The caller reports the outcome, not this function. It reopens its
+        # transcript first, so the line lands in the log rather than only on a
+        # console nobody is reading after an unattended run.
         return $child.ExitCode
     } catch {
         # Declining the UAC prompt throws here.

@@ -253,9 +253,40 @@
                 -LogDirectory $logDir -MainLog $mainLog)
         }
 
+        # Close the transcript before handing off, and reopen it afterwards to
+        # record the outcome.
+        #
+        # The child computes its own run stamp and starts its own transcript. The
+        # stamps have one-second resolution, so if the two land in the same second
+        # they resolve to the same file -- and two processes with it open at once
+        # is not benign: -Append reports success and then the child's content is
+        # silently lost. Measured here, a child needs ~1.7s to start and import
+        # before it stamps, so today the stamps always differ. That is a timing
+        # margin under 2x on one machine, it narrows on faster hardware, and the
+        # failure it guards is the loss of the elevated transcript -- the one that
+        # did the work. Not overlapping costs nothing and does not depend on it.
+        # Said before the close, not after: if the elevated child hangs or the
+        # machine dies mid-run, this transcript is all there is, and it should
+        # name the log the real work went to.
+        $childNote = "Handing off to an elevated run. Its transcript is a separate Update-Everything-*.log in $logDir, stamped when it starts."
+        Write-Host $childNote -ForegroundColor Yellow
+
+        if ($transcriptRunning) {
+            try { Stop-Transcript | Out-Null } catch { Write-Verbose "Transcript already stopped." }
+            $transcriptRunning = $false
+        }
+
         # A module function must not kill the session it was called from, so the
         # elevated child's outcome comes back as a result rather than an exit.
         $child = Invoke-SelfElevation -BoundParameters $PSBoundParameters
+
+        try {
+            Start-Transcript -Path $mainLog -Append -ErrorAction Stop | Out-Null
+            $transcriptRunning = $true
+        } catch {
+            Write-Verbose "Could not reopen the transcript to record the elevated run's outcome."
+        }
+        Write-Host "Elevated run finished with exit code $child." -ForegroundColor Green
 
         if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { Write-Verbose "Transcript already stopped." } }
         try { [Console]::OutputEncoding = $originalOutputEncoding } catch { Write-Verbose "Could not restore the console encoding." }
