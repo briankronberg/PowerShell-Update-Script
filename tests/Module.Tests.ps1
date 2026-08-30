@@ -589,6 +589,27 @@ Describe 'Repository documentation' -Tag 'Docs' {
         $script:Readme | Should-MatchString 'ExecutionPolicy Bypass'
     }
 
+    # PowerShell 7 is one of the things this module installs, so the install
+    # instructions cannot require it to already be there. The documented command
+    # ended in "pwsh -NoProfile ... -File $i", and on a machine with only
+    # Windows PowerShell that is "The term 'pwsh' is not recognized" -- the
+    # download succeeds and the install never happens, on exactly the machine
+    # the instructions are written for.
+    #
+    # Scoped to the Install section and to lines that run a host against a
+    # -File, so the Defender demonstration further down (which says pwsh to make
+    # a point about process creation) and the developer test commands are left
+    # alone.
+    It 'gives an install command that runs on Windows PowerShell' {
+        $section = [regex]::Match($script:Readme, '(?s)\n## Install\r?\n(.*?)\r?\n## ').Groups[1].Value
+        $section | Should-NotBeEmptyString -Because 'the Install section should still be findable'
+
+        $offenders = $section -split "`r?`n" |
+            Where-Object { $_ -match '-File' -and $_ -match '\bpwsh\b' }
+
+        $offenders | Should-BeNull -Because "pwsh does not exist until this module installs it:`n$($offenders -join "`n")"
+    }
+
     # Written with StartsWith rather than a regex on purpose. The regex form
     # needed a backslash escaped through several layers of tooling, lost one on
     # the way, and silently matched nothing.
