@@ -611,3 +611,82 @@ Describe 'The summary is displayed, not returned' -Tag 'Static','Module' {
         }
     }
 }
+
+Describe 'No step updates through a tool it has not verified' -Tag 'Static','Module' {
+
+    # The rule: a step must not invoke a package manager it has not confirmed is
+    # present. -RequiresCommand does that before the action runs. A step without
+    # one has to check for itself and end with Stop-StepAsSkipped, so the summary
+    # says skipped rather than OK for something that did nothing.
+    It 'checks for its tool, or skips itself explicitly' {
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1'), [ref] $null, [ref] $null)
+
+        # These need no external tool. PowerShell itself is always present, and
+        # Windows Update is gated by -RequiresAdmin and the install consent.
+        $builtIn = @(
+            'Trust PSGallery', 'PowerShell modules', 'PowerShell help',
+            'Windows Update', 'Windows Terminal default = PowerShell 7'
+        )
+
+        $offenders = foreach ($call in $ast.FindAll({
+                    param($n)
+                    $n -is [System.Management.Automation.Language.CommandAst] -and
+                    $n.GetCommandName() -eq 'Invoke-Step'
+                }, $true)) {
+
+            $elements = $call.CommandElements
+            $name = $null
+            $hasRequires = $false
+            for ($i = 0; $i -lt $elements.Count; $i++) {
+                if ($elements[$i] -isnot [System.Management.Automation.Language.CommandParameterAst]) { continue }
+                switch ($elements[$i].ParameterName) {
+                    'Name'            { if ($i + 1 -lt $elements.Count) { $name = $elements[$i + 1].Value } }
+                    'RequiresCommand' { $hasRequires = $true }
+                }
+            }
+
+            if ($hasRequires -or $name -in $builtIn) { continue }
+            if ($call.Extent.Text -match 'Stop-StepAsSkipped') { continue }
+
+            $name
+        }
+
+        $offenders | Should-BeNull -Because "these run a tool without confirming it is installed: $($offenders -join ', ')"
+    }
+
+    # Self-update is only right when nothing else owns the tool. Running it
+    # against a scoop or winget install fights that manager.
+    It 'asks who owns uv before telling it to update itself' {
+        $source = Get-Content (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1') -Raw
+        $step = [regex]::Match($source, "(?s)Invoke-Step -Name 'uv'.*?\r?\n    \}").Value
+
+        $step | Should-MatchString 'Get-ToolInstallSource'
+        $step | Should-MatchString 'Stop-StepAsSkipped'
+    }
+
+    # The old code excused any non-zero exit from uv as "expected when uv was
+    # installed via a package manager". On this machine the real cause was a
+    # locked file, and the step reported OK over a genuine failure.
+    It 'does not excuse an unexplained failure as a package manager' {
+        $source = Get-Content (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1') -Raw
+
+        $source | Should-NotMatchString 'expected when uv was installed'
+    }
+}
+
+Describe 'Get-ToolInstallSource' -Tag 'Unit' {
+
+    It 'reports Absent for a command that does not exist' {
+        & (Get-Module UpdateEverything) { Get-ToolInstallSource -Name 'definitely-not-a-real-command-xyz' } |
+            Should-Be 'Absent'
+    }
+
+    It 'recognises a standalone install under .local\bin' {
+        $result = & (Get-Module UpdateEverything) {
+            Mock Get-Command { [pscustomobject]@{ Source = 'C:\Users\someone\.local\bin\uv.exe' } }
+            Get-ToolInstallSource -Name 'uv'
+        }
+        $result | Should-Be 'Standalone'
+    }
+}

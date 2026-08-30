@@ -1,4 +1,4 @@
-﻿function Update-Everything {
+function Update-Everything {
 
     <#
     .SYNOPSIS
@@ -412,8 +412,7 @@
         $c2r = if ($found.Count) { $found[0] } else { $null }
 
         if (-not $c2r) {
-            Write-Output 'OfficeC2RClient.exe not found; no click-to-run Office install. Skipping.'
-            return
+            Stop-StepAsSkipped -Reason 'OfficeC2RClient.exe is not present, so there is no click-to-run Office install'
         }
 
         # The same action as the "Update Now" button, minus the prompts. C2R hands
@@ -520,18 +519,38 @@
     # 4. Python toolchain
     # ---------------------------------------------------------------------------
     Invoke-Step -Name 'Python (Install Manager)' -Action {
+        # Reported as skipped rather than OK. A step that did nothing because
+        # the tool is absent is not the same as a step that updated something,
+        # and the summary should not read as though Python were handled.
         if     (Get-Command pymanager -ErrorAction SilentlyContinue) { pymanager install --update }
         elseif (Get-Command py        -ErrorAction SilentlyContinue) { py install --update }
-        else   { Write-Output 'Python Install Manager not found; skipping.' }
+        else   { Stop-StepAsSkipped -Reason 'the Python Install Manager is not installed' }
     }
 
     Invoke-Step -Name 'uv' -RequiresCommand 'uv' -Action {
-        uv self update
-        # uv installed by a package manager refuses to self-update, which is correct
-        # behaviour rather than a run failure.
+        # Self-update only what nothing else is managing. Running "uv self
+        # update" against a uv that scoop or winget installed fights whichever
+        # one owns it, and that manager's own step will update it anyway.
+        $owner = Get-ToolInstallSource -Name 'uv'
+        if ($owner -notin 'Standalone', 'Unknown') {
+            Stop-StepAsSkipped -Reason "uv is managed by $owner, which updates it in its own step"
+        }
+
+        $output = uv self update 2>&1
+        $output
+
         if ($LASTEXITCODE -ne 0) {
-            Write-Output "uv self update returned $LASTEXITCODE (expected when uv was installed via a package manager)."
-            $global:LASTEXITCODE = 0
+            # uv refuses to self-update when a package manager owns it, and says
+            # so. That is correct behaviour rather than a failed run. Anything
+            # else is a real failure and gets reported as one, rather than
+            # excused with a guess about why it might have happened.
+            if (($output | Out-String) -match 'package manager|self-update.*(disabled|unavailable)') {
+                Write-Output 'uv declined to self-update because something else manages it.'
+                $global:LASTEXITCODE = 0
+            } else {
+                Write-Error "uv self update failed with exit code $LASTEXITCODE. uv's own message is in this step's log."
+                $global:LASTEXITCODE = 0
+            }
         }
     }
 
