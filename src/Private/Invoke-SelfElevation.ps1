@@ -43,7 +43,10 @@ function Invoke-SelfElevation {
 
     # -Command, not -File. -File coerces every argument to a string, so a typed
     # [bool] such as -IncludeWindowsUpdate $false would arrive as $true.
-    $escModule = "'" + ($script:ModuleRoot -replace "'", "''") + "'"
+    # The manifest, not the folder. Import-Module given a directory looks for a
+    # manifest named after it, which a versioned path like \1.0.0 never has.
+    $manifest = Join-Path $script:ModuleRoot 'UpdateEverything.psd1'
+    $escModule = "'" + ($manifest -replace "'", "''") + "'"
     $invoke = "Import-Module $escModule -Force; Update-Everything"
 
     foreach ($entry in $BoundParameters.GetEnumerator()) {

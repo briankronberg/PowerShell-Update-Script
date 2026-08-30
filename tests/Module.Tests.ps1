@@ -539,3 +539,30 @@ Describe 'PSScriptAnalyzer' -Tag 'Lint' -Skip:(-not $HasAnalyzer) {
         $findings | Should-BeNull -Because "the baseline is clean, so these are new:`n$detail"
     }
 }
+
+Describe 'The relaunch imports a manifest, not a folder' -Tag 'Static','Module' {
+
+    # Import-Module given a directory looks for a manifest named after that
+    # directory. An installed module sits in <name>\<version>, so pointing at
+    # the folder sends it hunting for 1.0.0.psd1 and it reports "no valid module
+    # file was found". Every scheduled run opened with that error. It carried on
+    # only because invoking the function auto-loaded the module by name, which
+    # also means the version that loaded was whichever the module path resolved.
+    It 'builds a task command line that imports the .psd1' {
+        $arguments = & (Get-Module UpdateEverything) {
+            Get-UpdateTaskArgument -ModuleRoot 'C:\Modules\UpdateEverything\1.0.0'
+        }
+
+        $arguments | Should-MatchString ([regex]::Escape("Import-Module 'C:\Modules\UpdateEverything\1.0.0\UpdateEverything.psd1'"))
+    }
+
+    It 'never imports a bare directory' {
+        $source = (Get-ChildItem (Join-Path $script:ModuleRoot 'Private') -Filter *.ps1 | Get-Content -Raw) -join "`n"
+
+        $offenders = [regex]::Matches($source, 'Import-Module \$escModule') |
+            ForEach-Object { $_.Value }
+
+        # $escModule must have been built from a path ending in .psd1.
+        $source | Should-MatchString "Join-Path .*ModuleRoot 'UpdateEverything\.psd1'"
+    }
+}

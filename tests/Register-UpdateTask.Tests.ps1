@@ -260,7 +260,7 @@ Describe 'Get-UpdateTaskArgument' -Tag 'Unit' {
         # A task runs in its own session, which may resolve a different copy of
         # the module or none at all when it is installed for the current user.
         Get-UpdateTaskArgument -ModuleRoot 'C:\Program Files\x\UpdateEverything' |
-            Should-MatchString ([regex]::Escape("Import-Module 'C:\Program Files\x\UpdateEverything'"))
+            Should-MatchString ([regex]::Escape("Import-Module 'C:\Program Files\x\UpdateEverything\UpdateEverything.psd1'"))
     }
 
     It 'turns the result object into an exit code' {
