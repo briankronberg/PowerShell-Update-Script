@@ -610,6 +610,31 @@ Describe 'Repository documentation' -Tag 'Docs' {
         $offenders | Should-BeNull -Because "pwsh does not exist until this module installs it:`n$($offenders -join "`n")"
     }
 
+    # The module installs into a folder named for its version and the installer
+    # refuses to overwrite one that exists. The version does not move with every
+    # commit, so a second install from main is 1.0.0 over 1.0.0 and stops. A
+    # documented command that works exactly once is worse than one that asks for
+    # a flag, because it looks like the instructions are wrong.
+    It 'gives an install command that can be run more than once' {
+        $section = [regex]::Match($script:Readme, '(?s)\n## Install\r?\n(.*?)\r?\n## ').Groups[1].Value
+
+        $installs = $section -split "`r?`n" |
+            Where-Object { $_ -match 'powershell .*-File' }
+
+        $installs | Should-NotBeNull -Because 'the Install section should still show how to run the installer'
+
+        $unforced = $installs | Where-Object { $_ -notmatch '(?i)\s-Force\b' }
+        $unforced | Should-BeNull -Because "these stop on a reinstall from main:`n$($unforced -join "`n")"
+    }
+
+    # -Force has to be an argument to the script, not part of its name. Written
+    # as 'Install-UpdateEverything.ps1 -force' inside the quotes it becomes the
+    # file name, and PowerShell then refuses the path for not ending in .ps1 --
+    # after the download has already succeeded.
+    It 'passes -Force to the installer rather than naming a file after it' {
+        $script:Readme | Should-NotMatchString "Join-Path \`$env:TEMP '[^']*-[Ff]orce'"
+    }
+
     # Written with StartsWith rather than a regex on purpose. The regex form
     # needed a backslash escaped through several layers of tooling, lost one on
     # the way, and silently matched nothing.

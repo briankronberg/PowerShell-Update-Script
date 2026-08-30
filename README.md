@@ -10,13 +10,20 @@ and tell you what happened with a toast notification.
 Nothing but the URL is needed. Paste this into PowerShell:
 
 ```powershell
-$i = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'; Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1 -OutFile $i -UseBasicParsing; Unblock-File $i; powershell -NoProfile -ExecutionPolicy Bypass -File $i
+$i = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'; Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1 -OutFile $i -UseBasicParsing; Unblock-File $i; powershell -NoProfile -ExecutionPolicy Bypass -File $i -Force
 ```
 
 It downloads the installer, which fetches the module from GitHub and installs it
 into your own module path. No elevation, and it prints what it exported. Add
-`-Force` to overwrite an existing install, or `-Scope AllUsers` to install
-machine-wide, which does need elevation.
+`-Scope AllUsers` to install machine-wide, which does need elevation.
+
+`-Force` is in the command because the module installs into a folder named for
+its version, and the installer refuses to overwrite one that is already there.
+The version does not change with every commit, so a second install from `main`
+is an overwrite of `1.0.0` by `1.0.0` and stops without it. On a first install
+it does nothing; on every one after, it is what makes the line safe to paste
+again. Nothing is lost if it is interrupted: the installer stages the new copy
+and validates it before it replaces the old one.
 
 Then:
 
@@ -54,7 +61,7 @@ git clone https://github.com/briankronberg/UpdateEverything.git
 ```
 
 ```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File .\UpdateEverything\Install.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\UpdateEverything\Install.ps1 -Force
 ```
 
 Add `-FromGitHub` to install what is published rather than what is in the
