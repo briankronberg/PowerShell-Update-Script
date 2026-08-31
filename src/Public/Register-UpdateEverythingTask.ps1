@@ -214,6 +214,16 @@
         -Force `
         -ErrorAction Stop
 
+    # The monthly cadence is finished here rather than in the trigger, because
+    # Register-ScheduledTask cannot be given a monthly day-of-week trigger at
+    # all. The task is registered weekly above and its XML rewritten now. See
+    # Set-MonthlyDayOfWeekTrigger for why that is the only way through.
+    if ($Cadence -eq 'PatchTuesday') {
+        Set-MonthlyDayOfWeekTrigger -TaskName $TaskName -TaskPath $TaskPath `
+            -Start $trigger.StartBoundary -DayOfWeek ([System.DayOfWeek]::Wednesday) `
+            -Occurrence 3 -RandomDelayMinutes $RandomDelayMinutes
+    }
+
     Write-Host ''
     Write-Host "Registered '$fullTaskName'." -ForegroundColor Green
     Write-Host "  Schedule : $(Get-CadenceDescription -Cadence $Cadence -DayOfWeek $DayOfWeek -At $At)"
