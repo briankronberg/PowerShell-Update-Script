@@ -1687,3 +1687,71 @@ Describe 'Get-UpdateToolInventory' -Tag 'Unit' {
         $LASTEXITCODE | Should-Be 0
     }
 }
+
+Describe 'Step order' -Tag 'Static' {
+
+    # The order is a contract, not a preference, so it is asserted rather than
+    # left to whoever edits the file next. Everything here is a dependency
+    # somebody would otherwise have to rediscover.
+
+    BeforeAll {
+        $script:OrderSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+
+        $script:Order = @([regex]::Matches($script:OrderSource, "Invoke-Step -Name '([^']+)'") |
+            ForEach-Object { $_.Groups[1].Value })
+
+        $script:PositionOf = {
+            param($name)
+            $i = [array]::IndexOf($script:Order, $name)
+            if ($i -lt 0) { throw "No step named '$name'." }
+            $i
+        }
+    }
+
+    It 'found every step' {
+        $script:Order.Count | Should-BeGreaterThan 20
+    }
+
+    It 'takes the inventory before it changes anything' {
+        & $script:PositionOf 'Inventory' | Should-Be 0
+    }
+
+    # Chocolatey and Scoop install language toolchains. Updating uv or npm
+    # first and the manager that owns it second updates a tool and then the
+    # thing responsible for it.
+    It '<_> runs before the toolchains it may own' -ForEach @('Chocolatey', 'Scoop') {
+        $manager = & $script:PositionOf $_
+        foreach ($toolchain in 'uv', 'pipx packages', 'npm', 'rustup', '.NET global tools') {
+            $manager | Should-BeLessThan (& $script:PositionOf $toolchain)
+        }
+    }
+
+    # winget owns Chocolatey and Scoop on plenty of machines, and App Installer
+    # is winget updating itself.
+    It 'updates winget before the managers winget may own' {
+        $winget = & $script:PositionOf 'winget self-update'
+        $winget | Should-BeLessThan (& $script:PositionOf 'winget (all sources)')
+        $winget | Should-BeLessThan (& $script:PositionOf 'Chocolatey')
+        $winget | Should-BeLessThan (& $script:PositionOf 'Scoop')
+    }
+
+    # The module step runs on the client the tooling step installs.
+    It 'sets up the gallery before it uses the gallery' {
+        (& $script:PositionOf 'Trust PSGallery')  | Should-BeLessThan (& $script:PositionOf 'Gallery tooling')
+        (& $script:PositionOf 'Gallery tooling')  | Should-BeLessThan (& $script:PositionOf 'PowerShell modules')
+    }
+
+    # -AutoReboot can restart the machine out from under whatever follows, so
+    # nothing may follow.
+    It 'leaves Windows Update until last' {
+        & $script:PositionOf 'Windows Update' | Should-Be ($script:Order.Count - 1)
+    }
+
+    # Windows Terminal's default profile points at the pwsh the PowerShell 7
+    # step installs, so it has to exist first.
+    It 'installs PowerShell 7 before pointing Terminal at it' {
+        (& $script:PositionOf 'PowerShell 7 (latest)') |
+            Should-BeLessThan (& $script:PositionOf 'Windows Terminal default = PowerShell 7')
+    }
+}
