@@ -37,12 +37,8 @@ if ($sessionManager -and
     # that is in use, and the restart is what completes it. A pair with an empty
     # destination is a scheduled *deletion*, which installers queue constantly
     # for their own temp files and which needs no restart to be meaningful.
-    #
-    # Counting every entry made a single leftover
-    #   *1\??\C:\Users\...\AppData\Local\Temp\DEL396A.tmp
-    # announce "[!] A reboot is pending" on every run, while Component Based
-    # Servicing and Windows Update both reported nothing pending at all. A
-    # restart prompt nobody needs is one people learn to ignore.
+    # Counting every entry would report a reboot as pending for a single leftover
+    # temp-file deletion such as *1\??\C:\...\Temp\DEL396A.tmp.
     $entries     = @($sessionManager.PendingFileRenameOperations)
     $renamePaths = [System.Collections.Generic.List[string]]::new()
     $deletions   = 0
@@ -60,11 +56,9 @@ if ($sessionManager -and
             continue
         }
 
-        # Report which file, not just how many. "Pending file renames (1)" sent
-        # someone through the event log, the servicing keys and the Office
-        # update state to work out what a restart was actually for, and the
-        # answer was unrecoverable by then: the queue is consumed at boot and
-        # nothing else records it. The path is the whole answer, so log it.
+        # Report which file, not just how many. The queue is consumed at boot and
+        # nothing else records it, so a bare count cannot be resolved back into a
+        # reason after a restart.
         #
         # Sources carry NT object-manager syntax and MoveFileEx markers --
         # "\??\C:\x", "*1\??\C:\x" and "!\??\C:\x" all mean C:\x. Trim them so

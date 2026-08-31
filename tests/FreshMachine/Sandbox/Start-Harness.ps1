@@ -124,9 +124,10 @@ try {
     Write-Output '== Install command, taken from README =='
     $readme = Get-Content (Join-Path $RepoPath 'README.md') -Raw
 
-    # The first fenced powershell block in the Install section is the command a
-    # new user pastes.
-    $section = [regex]::Match($readme, '(?s)\n## Install\r?\n(.*?)\r?\n## ').Groups[1].Value
+    # The GitHub one-liner, not the gallery command that now leads the section.
+    # This harness has no published version to install from -- it tests main, and
+    # the download-then-run path is where the defects it exists to catch were.
+    $section = [regex]::Match($readme, '(?s)\n### Install from GitHub\r?\n(.*?)\r?\n#{2,3} ').Groups[1].Value
     $command = [regex]::Match($section, '(?s)```powershell\r?\n(.*?)```').Groups[1].Value.Trim()
 
     $found = -not [string]::IsNullOrWhiteSpace($command)

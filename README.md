@@ -7,7 +7,28 @@ and tell you what happened with a toast notification.
 
 ## Install
 
-Nothing but the URL is needed. Paste this into PowerShell:
+From the PowerShell Gallery:
+
+```powershell
+Install-Module UpdateEverything -Scope CurrentUser
+```
+
+Then:
+
+```powershell
+Import-Module UpdateEverything
+```
+
+`-Scope AllUsers` installs machine-wide and needs elevation. `Update-Module
+UpdateEverything` moves to the next published release.
+
+Requires PowerShell 5.1 or later on Windows 10 or a matching Server release.
+
+### Install from GitHub
+
+The gallery carries releases. `main` carries what is being worked on, which is
+where to get a fix that has landed but not shipped. Nothing but the URL is
+needed:
 
 ```powershell
 $i = Join-Path $env:TEMP 'Install-UpdateEverything.ps1'; Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1 -OutFile $i -UseBasicParsing; Unblock-File $i; powershell -NoProfile -ExecutionPolicy Bypass -File $i -Force
@@ -25,11 +46,8 @@ it does nothing; on every one after, it is what makes the line safe to paste
 again. Nothing is lost if it is interrupted: the installer stages the new copy
 and validates it before it replaces the old one.
 
-Then:
-
-```powershell
-Import-Module UpdateEverything
-```
+`Update-Everything -UpdateSelf` does the same thing from inside a run, and also
+tracks `main` rather than the gallery.
 
 ### Why that command is shaped the way it is
 
@@ -72,8 +90,6 @@ To load it without installing, point `Import-Module` at the source:
 ```powershell
 Import-Module .\UpdateEverything\src\UpdateEverything.psd1
 ```
-
-Requires PowerShell 5.1 or later on Windows 10 or a matching Server release.
 
 ### Execution policy
 

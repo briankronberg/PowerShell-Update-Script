@@ -1,7 +1,7 @@
-# The OperatingSystem object, not its Version. An earlier draft took .Version
-# here and then asked it for .Platform, which is always $null. Windows
-# PowerShell has no $IsWindows to fall back on, so the guard fired and the module
-# refused to load on the very edition the manifest promises to support.
+# The OperatingSystem object, not its Version: .Platform is a property of the
+# former and is always $null on the latter. Windows PowerShell has no $IsWindows
+# to fall back on, so a $null here would fail the guard below on a supported
+# edition.
 $OS = [System.Environment]::OSVersion
 
 if ($OS.Platform -ne [System.PlatformID]::Win32NT) {

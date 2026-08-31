@@ -6,48 +6,53 @@
         through the package managers and update channels it can find.
 
     .DESCRIPTION
-        v3 adds:
-          - Installs PowerShell 7 if missing, or upgrades it to the latest release,
-            via winget. Keeps the MSI package format so it lands in
-            C:\Program Files\PowerShell\7 (the path Windows Terminal looks for).
-          - Makes PowerShell 7 the default Windows Terminal profile by pointing
-            settings.json "defaultProfile" at the PowerShell Core profile GUID.
-            Only that one value is changed; the rest of settings.json is preserved.
+        Each update channel runs as an isolated step, so one failure does not stop
+        the rest. Every step writes its own log, and the run ends with a summary
+        table and a result object.
 
-        Inherited from v2:
-          - Captures full stdout/stderr per step into dedicated log files
-          - Validates external CLI exit codes ($LASTEXITCODE), reset per step so a
-            cmdlet-only step cannot inherit a stale code from an earlier native command
-          - Relaunches elevated via -Command (not -File) so typed [bool] parameters
-            survive the elevation
-          - Structured summary with log file references and reboot detection
+        What it drives:
+          - winget: the source indexes, App Installer (winget itself, which
+            "winget upgrade --all" does not reliably cover), then every source
+          - Windows Update via the PSWindowsUpdate module, scanning Microsoft
+            Update rather than Windows Update alone, so Office and other
+            Microsoft products are included
+          - Microsoft 365 Apps via OfficeC2RClient, and Defender signatures
+          - PowerShell modules and help, with PSGallery trusted once
+            (PowerShellGet v2 and PSResourceGet v3) so neither stops on the
+            untrusted-repository prompt
+          - Python (Install Manager), uv, pipx, npm, Chocolatey, Scoop, rustup,
+            dotnet global tools and workloads, GitHub CLI extensions, WSL kernel
+          - PowerShell 7 itself, installed or upgraded through winget in MSI form
+            so it lands in C:\Program Files\PowerShell\7, the path Windows
+            Terminal looks for
+          - Windows Terminal's defaultProfile, pointed at the PowerShell Core
+            profile GUID. Only that one value is changed; the rest of
+            settings.json is preserved
 
-        Also in this revision:
-          - Trusts PSGallery once (PowerShellGet v2 + PSResourceGet v3) so module
-            and help updates never stop on the untrusted-repository prompt
-          - Refreshes the winget source indexes and updates App Installer (winget
-            itself), which "winget upgrade --all" does not reliably cover
-          - Updates Microsoft 365 Apps via OfficeC2RClient, .NET workloads, and
-            GitHub CLI extensions
-          - Scans Microsoft Update rather than Windows Update alone, so Office and
-            other Microsoft products are included
-          - Stamps step logs per run and prunes old ones via -LogRetentionDays
-
-        Robustness notes (why this script is shaped the way it is):
-          - Steps capture every stream (*>&1), not just warnings, so the step log is
-            a complete record. Native stderr surfaces as error records too, and many
-            CLIs write ordinary progress there, so only errors raised by PowerShell
-            itself are counted -- those mark a step 'Warning' rather than 'OK'.
-          - Package managers routinely return non-zero for "nothing to do" or for a
-            partial success. Those codes are enumerated per step rather than being
-            treated as run failures.
-          - Presence of an .exe is not proof a feature is installed. wsl.exe ships in
-            System32 on every Windows 11 machine; Defender cmdlets exist even where a
-            third-party AV has taken over. Both are probed before use.
-          - winget output is localised and its Id column is truncated to the console
-            width, so package presence is decided by exit code, never by text match.
-          - The script exits with the number of failed steps, so a scheduled task or
-            monitoring wrapper can detect a bad run.
+        How it behaves:
+          - Steps capture every stream (*>&1), not just warnings, so the step log
+            is a complete record. Native stderr surfaces as error records too, and
+            many CLIs write ordinary progress there, so only errors raised by
+            PowerShell itself are counted -- those mark a step 'Warning' rather
+            than 'OK'.
+          - Package managers routinely return non-zero for "nothing to do" or for
+            a partial success. Those codes are enumerated per step rather than
+            being treated as run failures.
+          - $LASTEXITCODE is reset per step, so a cmdlet-only step cannot inherit
+            a stale code from an earlier native command.
+          - Presence of an .exe is not proof a feature is installed. wsl.exe ships
+            in System32 on every Windows 11 machine; Defender cmdlets exist even
+            where a third-party AV has taken over. Both are probed before use.
+          - winget output is localised and its Id column is truncated to the
+            console width, so package presence is decided by exit code, never by
+            text match.
+          - The elevated relaunch passes -Command rather than -File, so typed
+            [bool] parameters survive it.
+          - Step logs and the transcript share one per-run stamp and are pruned by
+            -LogRetentionDays.
+          - The failed-step count is returned rather than exited with, so calling
+            this from a session does not end that session. A scheduled task turns
+            FailedCount into an exit code itself.
 
         Policy note: winget runs here with --accept-package-agreements, which
         accepts vendor licence agreements on your behalf for every package it
@@ -140,23 +145,29 @@
         warning has scrolled well out of sight.
 
     .PARAMETER UpdateSelf
-        Reinstall this module from GitHub before doing anything else, whether or
-        not the installed version differs. Default: $false.
+        Reinstall this module from the main branch on GitHub before doing
+        anything else, whether or not the installed version differs.
+        Default: $false.
 
-        The version does not move with every commit and the module is
-        distributed from a branch rather than the PowerShell Gallery, so
-        "already 1.0.0" is the normal state of an out-of-date copy. This is what
-        makes tracking main practical.
+        This tracks the development head, not the latest release. To move
+        between published versions, use the gallery instead:
+
+            Update-Module UpdateEverything
+
+        The module version does not move with every commit, so "already 1.0.0"
+        is the normal state of an out-of-date working copy and a version check
+        cannot decide whether a reinstall is needed. Hence the unconditional
+        reinstall.
 
         It takes effect on the *next* run. Unlike winget, which is a fresh
-        process every step, this module is already loaded by the time it runs:
-        the files on disk are replaced, and the functions executing now stay on
-        the code already in memory.
+        process every step, this module is already loaded by the time the step
+        runs: the files on disk are replaced, and the functions executing now
+        stay on the code already in memory.
 
-        Off by default, and deliberately. It fetches and runs an installer from
-        a branch, which is a supply-chain decision rather than a routine update,
-        and a scheduled task that quietly followed main would be making that
-        decision every week on its own.
+        Off by default. It fetches and runs an installer from a branch, which is
+        a supply-chain decision rather than a routine update, and a scheduled
+        task that quietly followed main would be making that decision on every
+        run.
 
     .PARAMETER LogRetentionDays
         Delete logs and settings.json backups in the log directory older than this
@@ -214,21 +225,20 @@
         [switch] $UpdateSelf
     )
 
-    # $script:, not a plain local. As a script these lived at script scope and
-    # the private helpers read them as $script:. Inside a module a plain
-    # assignment is function-scoped, so Invoke-Step would read an unset
-    # $script:logDir and fail on every single step.
-    # TLS: no hardcoded override. Modern Windows/PowerShell negotiates TLS 1.2/1.3 automatically.
+    # State shared with the private helpers is assigned with $script:. Inside a
+    # module a plain assignment is function-scoped, so Invoke-Step would read an
+    # unset $script:logDir and fail on every step.
+    #
+    # No hardcoded TLS override: current Windows and PowerShell negotiate TLS
+    # 1.2/1.3 on their own.
     $originalOutputEncoding = Initialize-ConsoleEncoding
 
     # ---------------------------------------------------------------------------
     # 1. Logging
     #
-    # Before the elevation decision, not after it. Logging used to start once
-    # elevation had already succeeded, so every way this run could decline to
-    # start -- a standard user, UAC switched off, a host that cannot be elevated
-    # at all -- produced no log whatsoever. A PowerShell 7 run that could not
-    # elevate left nothing behind to read, and never would have.
+    # Set up before the elevation decision, not after it, so that every way this
+    # run can decline to start -- a standard user, UAC switched off, a host that
+    # cannot be elevated at all -- still leaves a log behind to read.
     # ---------------------------------------------------------------------------
     $script:logDir = Get-UpdateLogDirectory
 
@@ -237,8 +247,8 @@
     $script:runStamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $mainLog  = Join-Path $logDir "Update-Everything-$runStamp.log"
 
-    # Step logs used to be a fixed name appended to forever. They now rotate per run,
-    # so prune the old ones (and stale Terminal settings backups) instead.
+    # Step logs rotate per run rather than being appended to forever, so old ones
+    # (and stale Terminal settings backups) are pruned by age instead.
     if ($LogRetentionDays -gt 0) {
         $cutoff = (Get-Date).AddDays(-$LogRetentionDays)
         Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue |
@@ -276,18 +286,17 @@
         # Close the transcript before handing off, and reopen it afterwards to
         # record the outcome.
         #
-        # The child computes its own run stamp and starts its own transcript. The
-        # stamps have one-second resolution, so if the two land in the same second
-        # they resolve to the same file -- and two processes with it open at once
-        # is not benign: -Append reports success and then the child's content is
-        # silently lost. Measured here, a child needs ~1.7s to start and import
-        # before it stamps, so today the stamps always differ. That is a timing
-        # margin under 2x on one machine, it narrows on faster hardware, and the
-        # failure it guards is the loss of the elevated transcript -- the one that
-        # did the work. Not overlapping costs nothing and does not depend on it.
-        # Said before the close, not after: if the elevated child hangs or the
-        # machine dies mid-run, this transcript is all there is, and it should
-        # name the log the real work went to.
+        # The child computes its own run stamp and starts its own transcript.
+        # Stamps have one-second resolution, so two starting in the same second
+        # resolve to the same path, and two processes holding it open is not
+        # benign: -Append reports success and the child's content is then lost.
+        # A child needs long enough to start and import that the stamps differ in
+        # practice, but not overlapping costs nothing and does not rely on that
+        # margin holding on faster hardware.
+        #
+        # The note is written before the close, not after. If the elevated child
+        # hangs, this transcript is all there is, and it has to name the log the
+        # real work went to.
         $childNote = "Handing off to an elevated run. Its transcript is a separate Update-Everything-*.log in $logDir, stamped when it starts."
         Write-Host $childNote -ForegroundColor Yellow
 
@@ -321,15 +330,9 @@
         Write-Warning 'Running without administrator rights. Steps that require admin will be skipped and listed in the summary.'
     }
 
-    # Notifications are resolved before any work starts, not after it. A warning
-    # raised at the end has scrolled past on an interactive run, and on a scheduled
-    # run there is no console reading it at all -- here it lands near the top of the
-    # transcript, where someone looking for "why did I not get a toast" will find it.
-    # It also means -InstallNotificationModule installs before the run rather than
-    # after everything it was meant to report on.
     # Offer a way out before anything is touched. This sits after the transcript
-    # starts, so the decision is on record, and before the notification and install
-    # checks, so skipping costs nothing.
+    # starts, so the decision is on record, and before the notification and
+    # install checks, so skipping costs nothing.
     if ($PromptBeforeRun) {
         if (-not (Test-CanPrompt)) {
             # A hidden window or redirected input cannot answer. Starting anyway
@@ -341,7 +344,7 @@
                     Write-Host 'Skipped at your request. Nothing was changed.' -ForegroundColor Yellow
                     if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { Write-Verbose "Transcript already stopped." } }
                     try { [Console]::OutputEncoding = $originalOutputEncoding } catch { Write-Verbose "Could not restore the console encoding." }
-                    # Not a failure. You decided, and the next scheduled run stands.
+                    # Ran $false, not a failure: the next scheduled run stands.
                     return (New-UpdateEverythingResult -Ran $false -Elevated:$isAdmin `
                         -Reason 'Skipped at the pre-run prompt.' -LogDirectory $logDir -MainLog $mainLog)
                 }
@@ -358,6 +361,9 @@
     # about at most once.
     $script:InstallDecision = @{}
 
+    # Resolved before any work starts, so a missing prerequisite is reported at
+    # the top of the transcript rather than after the run it was meant to report
+    # on, and so BurntToast is installed before rather than afterwards.
     $script:NotificationsAvailable = $false
     $notificationStatus = $null
     if ($Notify) {
@@ -392,19 +398,18 @@
                 Unblock-File -LiteralPath $installer -ErrorAction SilentlyContinue
 
                 # In a child process, and powershell rather than the current
-                # host: the installer imports the module when it finishes, and
-                # doing that inside the session currently running a function
-                # from that module is asking for trouble. powershell.exe is also
-                # always present, which pwsh is not.
+                # host: the installer imports the module when it finishes, which
+                # inside this session would re-import a module whose files have
+                # just been replaced under it. powershell.exe is also always
+                # present, which pwsh is not.
                 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Force
                 if ($LASTEXITCODE -ne 0) {
                     throw "The installer exited with code $LASTEXITCODE."
                 }
 
-                # Said plainly, because the obvious assumption is wrong. Unlike
-                # winget, which is a fresh process every step, this module is
-                # already loaded: the functions running now stay on the old code
-                # however new the files on disk are.
+                # Unlike winget, which is a fresh process every step, this module
+                # is already loaded: the functions running now stay on the code
+                # in memory however new the files on disk are.
                 Write-Output 'Updated. The new version loads on the next run; this one continues on the code already in memory.'
             } finally {
                 Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
@@ -626,8 +631,8 @@
 
     Invoke-Step -Name 'PowerShell modules' -Action {
         if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
-            # -TrustRepository is the belt to the trust step's braces: it suppresses
-            # the prompt even if the persisted trust could not be written.
+            # -TrustRepository suppresses the prompt for this call even when the
+            # Trust PSGallery step could not persist the setting.
             $p = @{
                 Name            = '*'
                 TrustRepository = $true
@@ -645,8 +650,8 @@
             }
 
             # PowerShellGet 1.0.0.1 -- the version Windows PowerShell ships -- has
-            # no -AcceptLicense, and splatting a parameter that does not exist is a
-            # terminating error, so this step used to fail outright on 5.1.
+            # no -AcceptLicense, and splatting a parameter that does not exist is
+            # a terminating error, which would fail this step outright on 5.1.
             if (Test-ParameterSupport -Command 'Update-Module' -Parameter 'AcceptLicense') {
                 $p.AcceptLicense = $true
             } else {
@@ -700,9 +705,8 @@
 
         if ($LASTEXITCODE -ne 0) {
             # uv refuses to self-update when a package manager owns it, and says
-            # so. That is correct behaviour rather than a failed run. Anything
-            # else is a real failure and gets reported as one, rather than
-            # excused with a guess about why it might have happened.
+            # so in its output. That is correct behaviour rather than a failed
+            # run. Any other non-zero exit is reported as a real failure.
             if (($output | Out-String) -match 'package manager|self-update.*(disabled|unavailable)') {
                 Write-Output 'uv declined to self-update because something else manages it.'
                 $global:LASTEXITCODE = 0
@@ -731,9 +735,9 @@
             $npmText = $npmOutput | Out-String
 
             # EBADENGINE means the newest npm does not support the installed Node,
-            # which is a fact about this machine rather than a fault in the update.
-            # Said plainly, because "exit code 1" sends people looking in the wrong
-            # place.
+            # which is a fact about this machine rather than a fault in the
+            # update. Reported in full, because the bare exit code does not say
+            # which of the two it is.
             if ($npmText -match 'EBADENGINE') {
                 $nodeVersion = try { node --version 2>$null } catch { 'unknown' }
                 Write-Error ("npm could not update itself: the latest npm does not support the installed Node.js ($nodeVersion). " +
@@ -957,10 +961,9 @@
             Import-Module PSWindowsUpdate -ErrorAction Stop
 
             # Windows Update alone offers the OS and drivers. Registering the
-            # Microsoft Update service widens the scan to Office and other Microsoft
-            # products, which is what the synopsis has always claimed to do.
-            # Managed devices often block this by policy, so degrade to a
-            # Windows-Update-only scan rather than failing the whole step.
+            # Microsoft Update service widens the scan to Office and other
+            # Microsoft products. Managed devices often block this by policy, so
+            # degrade to a Windows-Update-only scan rather than failing the step.
             $useMicrosoftUpdate = $false
             $muServiceId = '7971f918-a847-4430-9279-4a52d1efe18d'
             try {
@@ -991,9 +994,9 @@
     # ---------------------------------------------------------------------------
     Write-Host "`n================ SUMMARY ================" -ForegroundColor Green
     # Out-Host, not a bare pipeline. Inside a function, unassigned pipeline
-    # output is the return value, so this table stopped being displayed and
-    # started being returned: the caller got an array of formatting objects with
-    # the result buried among them, and the summary vanished from the run log.
+    # output is the return value, so without it the caller would receive the
+    # table's formatting objects alongside the result and the summary would not
+    # appear in the run log.
     $Results | Format-Table -AutoSize -Property Step, Status, Seconds | Out-Host
 
     $failedSteps  = @($Results | Where-Object { $_.Status -eq 'Failed' })
@@ -1044,10 +1047,9 @@
         Write-Host "    Reason: $($notificationStatus.Reason)" -ForegroundColor Yellow
         Write-Host '    The update run itself was unaffected.' -ForegroundColor Yellow
     } elseif (-not $Notify) {
-        # Say that nothing was asked for. Without this the run is simply silent
-        # about notifications, which reads as a broken feature rather than an
-        # unrequested one -- and sends people looking for a BurntToast prompt
-        # that was never going to appear.
+        # State that nothing was asked for. Without this the run says nothing at
+        # all about notifications, which reads as a broken feature rather than an
+        # unrequested one.
         Write-Host ''
         Write-Host 'Notifications: not requested. Pass -Notify for a toast when the run finishes.' -ForegroundColor DarkGray
     }

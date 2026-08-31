@@ -31,8 +31,7 @@
             if ($remaining -ne $lastShown) {
                 # [Console]::Write, not Write-Host: transcription does not see a
                 # raw console write, so the countdown redraws on screen without
-                # writing a line per second into the run log. A 60 second wait
-                # was putting 52 lines of countdown into a 276 line transcript.
+                # writing a line per second into the run log.
                 # The extra parentheses matter. Inside a method call the comma
                 # separates arguments, so Write("..." -f $a, $b) is parsed as
                 # Write(("..." -f $a), $b): the format string gets one argument

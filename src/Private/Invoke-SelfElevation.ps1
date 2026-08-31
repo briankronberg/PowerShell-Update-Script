@@ -5,14 +5,13 @@
         exit code that run finished with.
 
         .DESCRIPTION
-        As a script this relaunched $PSCommandPath. A module has no script path,
-        so the child imports the module by its own folder and calls the function.
-        Importing by path rather than by name matters: the elevated session may
-        resolve a different copy of the module, or none at all, if the module is
-        installed for the current user only.
+        The child imports this module by its own folder path and calls the
+        function. Importing by path rather than by name matters: the elevated
+        session may resolve a different copy of the module, or none at all, when
+        the module is installed for the current user only.
 
-        It returns rather than exits. Killing the session someone called a
-        function from would be a poor way to repay them for asking.
+        It returns rather than exits, so calling it does not end the caller's
+        session.
     #>
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of a console maintenance tool. Its output is progress a person watches, not data a caller consumes, and the summary uses colour to separate failures from noise.')]
     [CmdletBinding()]
@@ -68,17 +67,15 @@
     $manifest = Join-Path $script:ModuleRoot 'UpdateEverything.psd1'
     $escModule = "'" + ($manifest -replace "'", "''") + "'"
 
-    # The call is built on its own, separately from the import. Parentheses in
-    # PowerShell hold an expression, not a statement list, so wrapping both
-    # together --
+    # The import and the call are separate statements. Parentheses in PowerShell
+    # hold an expression, not a statement list, so combining them --
     #
     #     exit (Import-Module '...' -Force; Update-Everything).FailedCount
     #
-    # -- is a parse error: "Missing closing ')' in expression". The elevated
-    # window opened, pwsh exited 1 before running a line of it, and it closed
-    # again too fast to read, leaving no transcript and no clue. Import first,
-    # then exit on the call alone, which is what Get-UpdateTaskArgument has
-    # always done for the scheduled task.
+    # -- is a parse error ("Missing closing ')' in expression") and the elevated
+    # host exits 1 without running a line. Import first, then exit on the call
+    # alone, which is the shape Get-UpdateTaskArgument builds for the scheduled
+    # task.
     $call = 'Update-Everything'
 
     foreach ($entry in $BoundParameters.GetEnumerator()) {
