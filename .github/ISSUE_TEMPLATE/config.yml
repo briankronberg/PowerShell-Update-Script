@@ -1,0 +1,12 @@
+# Blank issues stay enabled. A form is worth filling in for a bug report or a
+# feature; it is friction for "remember to look at this", and friction is how a
+# note ends up somewhere that is not the issue tracker.
+blank_issues_enabled: true
+
+contact_links:
+  - name: How this module is built
+    url: https://github.com/briankronberg/UpdateEverything/blob/main/CONTRIBUTING.md
+    about: House style, the rules a change has to satisfy, and how the tests work. Worth reading before opening a pull request.
+  - name: Before your first run
+    url: https://github.com/briankronberg/UpdateEverything/blob/main/README.md#before-your-first-run
+    about: What the first run does, what it asks for, and what it will not do without permission.

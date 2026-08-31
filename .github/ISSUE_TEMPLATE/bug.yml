@@ -1,0 +1,86 @@
+name: Bug report
+description: Something did not work
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A step reported `Skipped` is usually not a bug — a package manager that
+        is not installed is skipped by design, with the reason in the summary.
+        `Failed` and `Warning` are the ones worth reporting.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, and what it did instead of what you expected.
+      placeholder: |
+        Ran Update-Everything from an unelevated PowerShell 7 session.
+        The elevated window opened and closed immediately, and no transcript
+        was written for it.
+    validations:
+      required: true
+
+  - type: input
+    id: step
+    attributes:
+      label: Which step
+      description: The step name from the summary table, if it was one step rather than the whole run.
+      placeholder: "winget (all sources)"
+
+  - type: dropdown
+    id: edition
+    attributes:
+      label: PowerShell edition
+      options:
+        - Windows PowerShell 5.1
+        - PowerShell 7 (MSI, in Program Files)
+        - PowerShell 7 (MSIX, from the Store or winget default)
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: elevated
+    attributes:
+      label: Was the session elevated
+      options:
+        - "Yes — started as administrator"
+        - "No — it tried to self-elevate"
+        - "No — ran with -SkipElevation"
+        - Ran from the scheduled task
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Module version
+      description: "`(Get-Module UpdateEverything -ListAvailable).Version`"
+      placeholder: "1.0.0"
+    validations:
+      required: true
+
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      description: "`(Get-ComputerInfo).OsName` and the build, or just winver."
+      placeholder: "Windows 11 Enterprise 26100"
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Log
+      description: |
+        The transcript is `Update-Everything-<stamp>.log` in your log directory,
+        and each step has its own `<step>-<stamp>.log` beside it. The summary
+        table prints the path. Paste the relevant part rather than the whole
+        file, and check it for machine names or paths you would rather not post.
+      render: text
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: A managed device, a policy that blocks something, a third-party AV, an unusual module path.
