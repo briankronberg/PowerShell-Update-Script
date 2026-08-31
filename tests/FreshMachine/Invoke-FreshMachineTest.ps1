@@ -35,8 +35,18 @@
     How long to wait for the sandbox to report. Default 45.
 
     .PARAMETER KeepSandboxOpen
-    Leave the sandbox running after the test finishes, to look around. Without
-    it the sandbox closes itself, which discards everything inside.
+    Leave the sandbox running after the test finishes, to look around.
+    Otherwise it is closed, which discards everything inside it.
+
+    A sandbox does not stop when its logon command finishes, and Windows runs
+    only one at a time -- so leaving one open means the next run starts nothing,
+    waits out its whole timeout, and reports a failure belonging to the run
+    before it. Close it before running again.
+
+    .PARAMETER CloseExistingSandbox
+    Close a sandbox that is already open, rather than refusing to start. Off by
+    default, because it may be one somebody is using for something else and
+    Windows gives no way to tell.
 
     .EXAMPLE
     .\Invoke-FreshMachineTest.ps1
@@ -56,10 +66,34 @@ param(
     [ValidateRange(5, 240)]
     [int] $TimeoutMinutes = 45,
 
-    [switch] $KeepSandboxOpen
+    [switch] $KeepSandboxOpen,
+
+    # Close a sandbox that is already open rather than refusing to start.
+    # Off by default: it may be one somebody is using for something else, and
+    # Windows gives no way to tell whose it is.
+    [switch] $CloseExistingSandbox
 )
 
 $ErrorActionPreference = 'Stop'
+
+function Close-Sandbox {
+    # The sandbox does not stop when its logon command finishes, and Windows
+    # runs only one at a time -- so leaving it open guarantees the next run
+    # starts nothing, waits out its whole timeout, and reports a failure that
+    # belongs to this run. That is exactly what happened once.
+    param([switch] $Keep)
+
+    if ($Keep) {
+        Write-Host 'Leaving the sandbox open, as asked. Close it before the next run.' -ForegroundColor DarkYellow
+        return
+    }
+
+    $running = @(Get-Process -Name $script:SandboxProcessNames -ErrorAction SilentlyContinue)
+    if ($running.Count -eq 0) { return }
+
+    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    Write-Host 'Sandbox closed.' -ForegroundColor DarkGray
+}
 
 $repoRoot   = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $sandboxSrc = Join-Path $PSScriptRoot 'Sandbox'
@@ -94,6 +128,35 @@ if (-not $feature -or $feature.State -ne 'Enabled') {
 $sandboxExe = Join-Path $env:WINDIR 'System32\WindowsSandbox.exe'
 if (-not (Test-Path -LiteralPath $sandboxExe)) {
     $problems.Add("WindowsSandbox.exe was not found at $sandboxExe.")
+}
+
+# Windows only runs one sandbox at a time, and starting a second does nothing
+# at all -- no window, no error, no clue. A run that hits this waits out its
+# whole timeout and reports a failure that belongs to the previous run.
+# The session processes, and deliberately not vmmemWindowsSandbox. That one is
+# the virtual machine's memory, reclaimed by the hypervisor on its own schedule
+# after the session is gone -- it cannot usefully be stopped, and it lingers for
+# minutes. Counting it meant "close the open sandbox" reported failure against a
+# sandbox that had already closed.
+$script:SandboxProcessNames = @(
+    'WindowsSandbox', 'WindowsSandboxClient', 'WindowsSandboxServer',
+    'WindowsSandboxRemoteSession'
+)
+$alreadyRunning = @(Get-Process -Name $script:SandboxProcessNames -ErrorAction SilentlyContinue)
+if ($alreadyRunning.Count -gt 0) {
+    if ($CloseExistingSandbox) {
+        Write-Host '  closing the sandbox that is already open...' -ForegroundColor DarkGray
+        $alreadyRunning | Stop-Process -Force -ErrorAction SilentlyContinue
+        Start-Sleep -Seconds 5
+        $stillThere = @(Get-Process -Name $script:SandboxProcessNames -ErrorAction SilentlyContinue)
+        if ($stillThere.Count -gt 0) {
+            $problems.Add('A Windows Sandbox is still running after being asked to close.')
+        }
+    } else {
+        $problems.Add(
+            'A Windows Sandbox is already running, and Windows allows only one. ' +
+            'Close it and try again, or pass -CloseExistingSandbox.')
+    }
 }
 
 if ($problems.Count -gt 0) {
@@ -167,7 +230,7 @@ try {
 
 Write-Host ''
 Write-Host 'Starting Windows Sandbox. It installs from GitHub, so it needs a network.' -ForegroundColor Yellow
-Write-Host 'Leave it alone; it drives itself and closes when it is done.'
+Write-Host 'Leave it alone; it drives itself. This closes it afterwards.'
 
 Start-Process -FilePath $sandboxExe -ArgumentList "`"$wsbPath`""
 
@@ -185,6 +248,8 @@ while (-not (Test-Path -LiteralPath $resultFile) -and (Get-Date) -lt $deadline) 
 
 if (-not (Test-Path -LiteralPath $resultFile)) {
     Write-Warning "No result after $TimeoutMinutes minutes. Anything the sandbox wrote is in $OutputPath."
+    Close-Sandbox -Keep:$KeepSandboxOpen
+
     return [pscustomobject]@{
         PSTypeName = 'UpdateEverything.SmokeResult'
         Passed     = $false
@@ -224,9 +289,7 @@ if (-not $result.Passed) {
 }
 Write-Host "Logs and transcripts: $OutputPath"
 
-if (-not $KeepSandboxOpen) {
-    Write-Host 'The sandbox closes itself; everything inside it is discarded.' -ForegroundColor DarkGray
-}
+Close-Sandbox -Keep:$KeepSandboxOpen
 
 [pscustomobject]@{
     PSTypeName = 'UpdateEverything.SmokeResult'
