@@ -30,13 +30,14 @@ BeforeDiscovery {
         @{ Name = 'PromptTimeoutSeconds';      TypeName = 'int';      Type = [int];      Default = '60' }
         @{ Name = 'DelayMinutes';              TypeName = 'int';      Type = [int];      Default = '60' }
         @{ Name = 'LogRetentionDays';          TypeName = 'int';      Type = [int];      Default = '30' }
+        @{ Name = 'UpdateSelf';                TypeName = 'switch';   Type = [switch];   Default = $null }
     )
 
     # Each of these either reboots the machine, moves pinned toolchains, or
     # reaches out to the gallery, so turning one on has to be deliberate.
     $DefaultOffSwitches = @(
         'AutoReboot', 'IncludePrerelease', 'UpdateGlobalNpm', 'SkipElevation',
-        'Notify', 'PromptBeforeRun'
+        'Notify', 'PromptBeforeRun', 'UpdateSelf'
     )
 
     # Steps that cannot work unelevated, and so must carry -RequiresAdmin.
@@ -453,7 +454,7 @@ Describe 'Update-Everything' -Tag 'Static' {
 
         It 'declares no parameters beyond the documented contract' {
             $script:DeclaredParameters.Name.VariablePath.UserPath |
-                Should-BeCollection -Count 13 -Because 'a new parameter needs docs and a test'
+                Should-BeCollection -Count 14 -Because 'a new parameter needs docs and a test'
         }
 
         It 'bounds -LogRetentionDays with ValidateRange' {
@@ -988,7 +989,9 @@ Describe 'No step updates through a tool it has not verified' -Tag 'Static','Mod
         # Windows Update is gated by -RequiresAdmin and the install consent.
         $builtIn = @(
             'Trust PSGallery', 'PowerShell modules', 'PowerShell help',
-            'Windows Update', 'Windows Terminal default = PowerShell 7'
+            'Windows Update', 'Windows Terminal default = PowerShell 7',
+            # Invoke-WebRequest is built in and powershell.exe is always there.
+            'UpdateEverything (self)'
         )
 
         $offenders = foreach ($call in $ast.FindAll({

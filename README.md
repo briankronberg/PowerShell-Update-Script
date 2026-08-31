@@ -156,6 +156,7 @@ thing that crosses a process boundary.
 | `-Notify` | off | Show a toast when the run finishes, plus an urgent one if a restart is needed. Intended for scheduled runs. |
 | `-AllowInstall` | *(none)* | Which missing components may be installed: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`, `PowerShellGet`. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
+| `-UpdateSelf` | off | Reinstall this module from GitHub first, whether or not the version differs. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. Off by default because it fetches and runs an installer from a branch. |
 
 ## What it updates
 
