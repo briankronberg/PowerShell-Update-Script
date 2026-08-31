@@ -488,6 +488,36 @@ Describe 'Update-Everything' -Tag 'Static' {
             (Get-Help Update-Everything).parameters.parameter.name |
                 Should-ContainCollection $Name -Because 'undocumented parameters drift into surprises'
         }
+
+        It 'has a description' {
+            (Get-Help Update-Everything).description |
+                Out-String | Should-NotBeEmptyString
+        }
+
+        # A line whose first non-space character is a dot is read as a help
+        # keyword, whatever word follows it. ".NET global tools" wrapped to the
+        # start of a line ends the section it sits in and silently discards
+        # every section after it -- Get-Help reports no error, it just returns
+        # empty descriptions and outputs.
+        It 'starts no help line with a dot that is not a help keyword' {
+            $keywords = 'SYNOPSIS', 'DESCRIPTION', 'PARAMETER', 'EXAMPLE', 'INPUTS',
+                        'OUTPUTS', 'NOTES', 'LINK', 'COMPONENT', 'ROLE',
+                        'FUNCTIONALITY', 'FORWARDHELPTARGETNAME',
+                        'FORWARDHELPCATEGORY', 'REMOTEHELPRUNSPACE', 'EXTERNALHELP'
+
+            $offenders = foreach ($file in Get-ChildItem $script:ModuleRoot -Recurse -Filter *.ps1) {
+                $text = Get-Content -LiteralPath $file.FullName -Raw
+                foreach ($block in [regex]::Matches($text, '(?s)<#(.*?)#>')) {
+                    foreach ($line in $block.Groups[1].Value -split "`r?`n") {
+                        if ($line -match '^\s*\.([A-Za-z]\w*)' -and $Matches[1].ToUpperInvariant() -notin $keywords) {
+                            "$($file.Name): $($line.Trim())"
+                        }
+                    }
+                }
+            }
+
+            $offenders | Should-BeNull -Because "these silently truncate comment-based help:`n$($offenders -join "`n")"
+        }
     }
 
     Context 'Step definitions' {

@@ -3,11 +3,10 @@
     # profile. Only the defaultProfile value is rewritten; nothing else is touched.
     #
     # Write-Output, not Write-Host. This runs inside an Invoke-Step action, where
-    # *>&1 merges the information stream into the pipeline: Write-Host wrote to
-    # the console and emitted an InformationRecord that Out-Default then rendered
-    # again, so every line here appeared twice in the transcript -- once wrapped
-    # to console width, once not. Write-Host stays the right call in
-    # Update-Everything's own summary, which is not inside a step.
+    # *>&1 merges the information stream into the pipeline: Write-Host would both
+    # write to the console and emit an InformationRecord for Out-Default to
+    # render, putting every line in the transcript twice. Write-Host remains
+    # correct in Update-Everything's own summary, which is not inside a step.
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'Called from one step, which reports what it did and backs the file up before writing. The step, not this helper, is where a caller decides whether to proceed.')]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'The parameter belongs to a MatchEvaluator delegate signature and must be declared whether or not the body reads it.')]
     param([Parameter(Mandatory)][string] $LogDir)
@@ -84,9 +83,9 @@
     Write-Output "Backed up settings.json -> $backup"
 
     $newKv = '"defaultProfile": "' + $ps7Guid + '"'
-    # Match any string value, not just a GUID. Terminal also accepts a profile
-    # name here, and the old GUID-only pattern missed that case and fell through
-    # to the insert branch, producing a second defaultProfile key.
+    # Match any string value, not just a GUID: Terminal also accepts a profile
+    # name here. A GUID-only pattern would miss that case and fall through to the
+    # insert branch, producing a second defaultProfile key.
     $pattern = '"defaultProfile"\s*:\s*"[^"]*"'
     if ($raw -match $pattern) {
         $updated = [regex]::Replace($raw, $pattern, [System.Text.RegularExpressions.MatchEvaluator]{ param($m) $newKv })

@@ -45,31 +45,27 @@
         # Reset so a cmdlet-only step can't inherit a stale exit code from an earlier native command
         $global:LASTEXITCODE = 0
 
-        # *>&1 rather than 4>&1: Write-Host goes to the information stream and
-        # native stderr to the error stream, so the old warning-only redirect put
-        # almost nothing in the step log. The ForEach-Object both accumulates the
-        # output for inspection and passes it through, so the console and the
-        # transcript still see it live during long-running steps.
-        # Out-String -Stream, then a single writer. Tee-Object -FilePath writes
-        # UTF-16LE in Windows PowerShell and has no -Encoding there, so it fought
-        # with Write-StepLog's ANSI over the same file and left every captured
-        # line as interleaved nulls. Out-String also renders the Format* records
-        # a table arrives as into the table itself, which writing the objects one
-        # at a time would not.
-        # Out-Host on the end, for the same reason the summary table has one.
-        # Inside a function, unassigned pipeline output is the return value, so
-        # every line a step produced was being returned to the caller rather than
-        # displayed. $result = Update-Everything -- the form the README documents
-        # -- therefore captured 63 objects with the result buried among them, and
-        # the transcript recorded none of the run it was supposed to be a record
-        # of. Sending it to the host displays it live, the transcript picks it up
-        # from there, and only the result object comes back.
-        # The Where-Object drops progress repaints. PowerShell splits captured
-        # native output on carriage returns, so a tool that redraws a progress
-        # bar in place -- winget above all -- arrives as one line per repaint
-        # and a single download becomes a column of percentages and spinner
-        # ticks, on the console and in the log alike. Nothing upstream prevents
-        # it: --disable-interactivity governs prompts, not rendering.
+        # *>&1 captures every stream, not just warnings: Write-Host writes to the
+        # information stream and native stderr to the error stream. The first
+        # ForEach-Object accumulates output for the error-record check below and
+        # passes each object through, so the console and the transcript see it
+        # live during long-running steps.
+        #
+        # Out-String -Stream renders the Format* records a table arrives as into
+        # the table itself, and leaves Write-StepLog as the file's only writer.
+        # Tee-Object is not usable here: it writes UTF-16LE in Windows PowerShell
+        # and has no -Encoding parameter there.
+        #
+        # Where-Object drops progress repaints. PowerShell splits captured native
+        # output on carriage returns, so a tool that redraws a progress bar in
+        # place -- winget above all -- arrives as one line per repaint. Nothing
+        # upstream prevents it: --disable-interactivity governs prompts, not
+        # rendering.
+        #
+        # Out-Host displays the output rather than returning it. Inside a
+        # function, unassigned pipeline output is the return value, so without it
+        # every line a step produced would reach the caller alongside the result
+        # object and the transcript would record none of it.
         #
         # $stepOutput is filled before the filter, so the error-record check
         # below still sees everything the step produced.

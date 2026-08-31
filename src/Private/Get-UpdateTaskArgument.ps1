@@ -42,11 +42,10 @@ function Get-UpdateTaskArgument {
 
     # The manifest, not the folder holding it. Given a directory, Import-Module
     # looks for a manifest named after that directory, so a versioned install
-    # path ending in \1.0.0 sends it hunting for 1.0.0.psd1 and it reports
-    # "no valid module file was found". The call still worked, because invoking
-    # Update-Everything auto-loaded the module by name a moment later, but every
-    # run opened with a red error and the version that loaded was whatever the
-    # module path happened to resolve rather than the one asked for.
+    # path ending in \1.0.0 sends it hunting for 1.0.0.psd1 and reports "no
+    # valid module file was found". Calling Update-Everything would still
+    # auto-load the module by name a moment later, but from whatever the module
+    # path resolves to rather than from the copy the task names.
     $manifest = Join-Path $ModuleRoot 'UpdateEverything.psd1'
     $escModule = "'" + ($manifest -replace "'", "''") + "'"
     $command = "Import-Module $escModule -Force; exit ($call).FailedCount"

@@ -144,6 +144,40 @@ disagree.
 *Enforced:* a test asserts every parameter is documented, and that nothing is
 documented that no longer exists.
 
+### Comments
+
+**A comment states a fact about the code, not the story of how it got there.**
+The reader is whoever changes this file next year, and what helps them is the
+constraint that is still true: the API that returns `$null`, the exit code that
+means "nothing to do", the parser rule that forces two statements apart. How
+that constraint came to be known does not help them.
+
+So: no version history (`used to`, `an earlier draft`, `they now rotate`), no
+narration of a debugging session or a review discussion, no measurements taken
+on one machine on one day, and no second person. Git holds that already, and a
+comment repeating it goes stale the moment the code moves.
+
+```powershell
+# Wrong -- narrates a debugging session
+# Counting every entry made a single leftover DEL396A.tmp announce a pending
+# reboot on every run, while CBS and Windows Update both reported nothing.
+
+# Right -- states what is true
+# A pair with an empty destination is a scheduled deletion, which installers
+# queue constantly for their own temp files and which needs no restart.
+```
+
+Explaining *why* is still in scope and is often the only thing worth writing.
+A "why" that is a property of Windows, of PowerShell, or of a tool's contract
+is a fact. A "why" that is a property of a past pull request is not.
+
+**Never start a line inside a help block with a dot.** A line whose first
+non-space character is a dot is read as a help keyword, whatever word follows
+it. A wrapped `.NET global tools` ends the section it sits in and discards every
+section after it — `Get-Help` reports no error, it just returns an empty
+description. Write `dotnet`, or reflow the line. *Enforced:* a test scans every
+`<# #>` block for a leading dot that is not a real keyword.
+
 ### Adopted with a documented exception
 
 These three are good general advice and wrong for parts of this module. The
@@ -409,10 +443,12 @@ longer exists. Assert both ways.
   it requires elevating, installing, or rebooting, it is being tested wrong.
 - No new `exit` in `src`, no `$ErrorActionPreference` in `src`, no empty
   `catch`.
+- Comments state facts about the code, not its history. The story of the change
+  belongs in the commit message and the pull request, where it stays accurate.
 - Commit messages say what changed and why, in the imperative, with the evidence
   where there is any — "Measured on 5.1: two occurrences before, one after" is
   worth more than an adjective. `git log` here is meant to read as a record of
-  decisions.
+  decisions, which is why the code does not have to be.
 
 ## Publishing
 
@@ -429,3 +465,20 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\Publish.ps1 -WhatIf
 
 It prompts for the API key rather than accepting it as an argument, so the key
 stays out of shell history and out of any transcript.
+
+Before publishing:
+
+- Raise `ModuleVersion` in the manifest. A version already on the gallery cannot
+  be replaced, and `Publish.ps1` refuses one that is not newer.
+- Rewrite `PrivateData.PSData.ReleaseNotes` to describe *this* version. It is the
+  package page, and it is as permanent as the version it ships with.
+- Run the [fresh-machine smoke test](tests/FreshMachine/README.md). It is not
+  part of `test.ps1`, it needs a hypervisor and several minutes, and it belongs
+  before a release rather than before a commit.
+
+Afterwards, tag the exact commit that was published, so the permanent version
+has something in the history pointing at it:
+
+```bash
+git tag -a v1.0.0 -m "1.0.0" && git push origin v1.0.0
+```

@@ -33,19 +33,43 @@
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
             ReleaseNotes = '# 1.0.0
 
-First release as a module. Previously a single script.
+First release. Updates a Windows machine through every package manager and
+update channel it can find, running each as an isolated step so one failure
+does not stop the rest.
 
-* Update-Everything returns a result object instead of exiting, so calling it
-  from a session no longer ends that session. A scheduled task turns
-  FailedCount into an exit code itself.
+## Commands
+
+* Update-Everything runs the update pass and returns a result object rather
+  than exiting, so calling it from a session does not end that session. A
+  scheduled task turns FailedCount into an exit code itself.
 * Register-UpdateEverythingTask, Get-UpdateEverythingTask and
-  Unregister-UpdateEverythingTask replace the switches on the old
-  Register-UpdateTask.ps1.
-* Nothing is installed for the first time without permission. -AllowInstall
-  approves in advance; an interactive run asks and defaults to No; a scheduled
-  run declines and reports the step as skipped.
+  Unregister-UpdateEverythingTask manage the scheduled task.
+* Test-PendingReboot reports whether Windows is waiting on a restart, and names
+  what is holding it.
+
+## Consent
+
+Nothing is installed for the first time without permission. -AllowInstall
+approves in advance; an interactive run asks and defaults to No; a
+non-interactive run declines and reports the step as skipped.
+
+## Running unelevated
+
+Elevation is checked before it is requested, so a standard user, a machine with
+UAC switched off, or an MSIX PowerShell that Windows will not run elevated each
+get an explanation instead of a UAC prompt that cannot succeed. -SkipElevation
+runs the steps that do not need administrator rights. Logging starts before the
+elevation decision, so a run that declines to start still leaves a log.
+
+## Also in this release
+
 * Optional toast notifications through BurntToast, including an urgent restart
   notice that breaks through Focus Assist.
+* -UpdateSelf reinstalls the module from the main branch on GitHub.
+* Per-run step logs and transcripts, pruned by -LogRetentionDays.
+* Windows PowerShell 5.1 and PowerShell 7 are both supported. Parameters absent
+  from the PowerShellGet 1.0.0.1 that Windows ships are probed rather than
+  assumed.
 '
         }
     }
