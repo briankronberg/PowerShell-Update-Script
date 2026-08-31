@@ -948,12 +948,22 @@ Describe 'The PowerShellGet upgrade offer' -Tag 'Static' {
             (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
     }
 
+    # The component name now comes from the table the step loops over, so the
+    # gate is asserted through that rather than as a literal. InstallConsent's
+    # "guards every install command with an approval check" is the general
+    # proof; this is the one that says PowerShellGet is still in the set.
     It 'is gated behind the same consent prompt as every other install' {
-        $script:MainSource | Should-MatchString "Approve-Install -Component 'PowerShellGet'"
+        $script:MainSource | Should-MatchString 'Approve-Install -Component \$tool\.Component'
+        $script:MainSource | Should-MatchString "Module = 'PowerShellGet';\s+Component = 'PowerShellGet'"
     }
 
-    It 'only fires when the installed version predates 2.0' {
-        $script:MainSource | Should-MatchString "\`$psget\.Version -lt \[version\]'2\.0\.0'"
+    # The version is not the test, and was never quite the right one. Windows
+    # ships PowerShellGet 1.0.0.1 in a form Update-Module refuses, and so does
+    # PowerShell 7 with its own 2.2.5 -- the shared condition is whether
+    # PowerShellGet recorded the install, not what number it carries.
+    It 'decides by whether the copy can be updated, not by its version' {
+        $script:MainSource | Should-NotMatchString "\`$psget\.Version -lt \[version\]'2\.0\.0'"
+        $script:MainSource | Should-MatchString '\$status\.Updatable'
     }
 
     # The Trust PSGallery step carries no -RequiresAdmin, and -Scope AllUsers
@@ -974,7 +984,7 @@ Describe 'The PowerShellGet upgrade offer' -Tag 'Static' {
         'src\Public\Register-UpdateEverythingTask.ps1'
     ) {
         Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) $_) -Raw |
-            Should-MatchString "ValidateSet\('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet'\)"
+            Should-MatchString "ValidateSet\('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet'\)"
     }
 }
 
@@ -1265,5 +1275,201 @@ Describe 'Invoke-Step -RequiresAdmin' -Tag 'Unit','Security' {
             Invoke-Step -Name 'needs-admin' -RequiresAdmin -Action { 'x' } 6>$null
             $script:Results[0].Status | Should-Be 'OK'
         }
+    }
+}
+
+Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
+
+    # Get-Module is left real and asked about modules whose presence is already
+    # known: Pester is installed, because it is running this. Mocking Get-Module
+    # would put a mock in the path of Pester's own calls to it.
+    #
+    # Find-Module is mocked in every case, so nothing here needs a network.
+
+    BeforeAll {
+        $script:PesterVersion = @(Get-Module Pester -ListAvailable |
+            Sort-Object Version -Descending)[0].Version
+        $script:Absent = 'UpdateEverything.NoSuchModule.7f3a1c'
+    }
+
+    It 'reports an update when the gallery is ahead of what is installed' {
+        $newer = [version]::new($script:PesterVersion.Major + 1, 0, 0)
+        Mock Find-Module { [pscustomobject]@{ Version = $newer } }
+
+        $status = Get-GalleryModuleStatus -Name Pester
+
+        $status.Installed   | Should-Be $script:PesterVersion
+        $status.Available   | Should-Be $newer
+        $status.NeedsUpdate | Should-BeTrue
+    }
+
+    It 'reports no update when the gallery matches what is installed' {
+        Mock Find-Module { [pscustomobject]@{ Version = $script:PesterVersion } }
+
+        (Get-GalleryModuleStatus -Name Pester).NeedsUpdate | Should-BeFalse
+    }
+
+    It 'reports no update when the gallery is behind what is installed' {
+        Mock Find-Module { [pscustomobject]@{ Version = '0.0.1' } }
+
+        (Get-GalleryModuleStatus -Name Pester).NeedsUpdate | Should-BeFalse
+    }
+
+    # A gallery that cannot be reached must present as "cannot tell", never as
+    # "up to date" and never as a reason to reinstall.
+    It 'reports Available as null when the gallery cannot be reached' {
+        Mock Find-Module { throw 'no such host is known' }
+
+        $status = Get-GalleryModuleStatus -Name Pester
+
+        $status.Available   | Should-BeNull
+        $status.NeedsUpdate | Should-BeFalse
+        $status.Installed   | Should-Be $script:PesterVersion
+    }
+
+    It 'reports Installed as null for a module that is not on the machine' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+
+        (Get-GalleryModuleStatus -Name $script:Absent).Installed | Should-BeNull
+    }
+
+    # An absent module is an install decision, not an update, and the caller
+    # tells them apart by this flag.
+    It 'never reports an update for a module that is not installed' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+
+        (Get-GalleryModuleStatus -Name $script:Absent).NeedsUpdate | Should-BeFalse
+    }
+
+    # Update-Module refuses anything it did not install, so this is the flag that
+    # decides between an update and a side-by-side install. Get-InstalledModule
+    # is mocked rather than read, because whether this machine's Pester arrived
+    # through Install-Module is not something a test should depend on.
+    It 'reports Updatable when PowerShellGet recorded the install' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledModule { [pscustomobject]@{ Name = 'Pester' } }
+
+        (Get-GalleryModuleStatus -Name Pester).Updatable | Should-BeTrue
+    }
+
+    It 'reports a copy the host shipped as not updatable' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledModule { }
+
+        (Get-GalleryModuleStatus -Name Pester).Updatable | Should-BeFalse
+    }
+
+    # NeedsUpdate answers "is the gallery ahead", not "can this be updated".
+    # The caller needs both, and conflating them is what drove Update-Module at
+    # a shipped PowerShellGet 1.0.0.1 and failed the step.
+    It 'still reports NeedsUpdate for a shipped copy the gallery is ahead of' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledModule { }
+
+        $status = Get-GalleryModuleStatus -Name Pester
+        $status.NeedsUpdate | Should-BeTrue
+        $status.Updatable   | Should-BeFalse
+    }
+
+    It 'reports a module that is not installed as not updatable' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+
+        (Get-GalleryModuleStatus -Name $script:Absent).Updatable | Should-BeFalse
+    }
+
+    # Find-Module returns the version as a string on some PowerShellGet versions
+    # and a [version] on others, and a prerelease carries a suffix that [version]
+    # cannot parse at all.
+    It 'strips a prerelease suffix rather than failing on it' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9-preview3' } }
+
+        (Get-GalleryModuleStatus -Name Pester).Available | Should-Be ([version]'9.9.9')
+    }
+}
+
+Describe 'The Gallery tooling step' -Tag 'Static' {
+
+    # The gallery tooling was installed when missing and then never brought
+    # forward, so a machine could carry a years-old NuGet provider or a
+    # PowerShellGet 2.1 indefinitely. Every other gallery step runs on it.
+
+    BeforeAll {
+        $script:MainSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+
+        $script:ToolingAt = $script:MainSource.IndexOf("Invoke-Step -Name 'Gallery tooling'")
+        $script:ModulesAt = $script:MainSource.IndexOf("Invoke-Step -Name 'PowerShell modules'")
+        $script:TrustAt   = $script:MainSource.IndexOf("Invoke-Step -Name 'Trust PSGallery'")
+    }
+
+    It 'exists' {
+        $script:ToolingAt | Should-BeGreaterThan -1
+    }
+
+    # Trust has to be set before anything installs, or the install stops on the
+    # untrusted-repository prompt rather than failing.
+    It 'runs after the trust step' {
+        $script:ToolingAt | Should-BeGreaterThan $script:TrustAt
+    }
+
+    # The module step is one of the things that runs on this tooling, so
+    # updating it afterwards would leave the run using the version it was
+    # trying to replace.
+    It 'runs before the step that depends on it' {
+        $script:ToolingAt | Should-BeLessThan $script:ModulesAt
+    }
+
+    It 'asks the gallery through the shared helper rather than inline' {
+        $script:MainSource | Should-MatchString 'Get-GalleryModuleStatus -Name \$name'
+    }
+
+    It 'covers PSResourceGet as well as PowerShellGet' {
+        $script:MainSource | Should-MatchString ([regex]::Escape('Microsoft.PowerShell.PSResourceGet'))
+    }
+
+    # Update-Module refuses anything it did not install, so a copy the host
+    # shipped can only be replaced side by side -- which is an install, and asks.
+    # Windows PowerShell ships PowerShellGet 1.0.0.1 exactly this way, and
+    # driving it with Update-Module fails the step outright.
+    It 'tells a shipped copy apart from one it can update' {
+        $script:MainSource | Should-MatchString '\$status\.Updatable'
+    }
+
+    It 'asks before replacing a shipped copy side by side' {
+        $script:MainSource | Should-MatchString 'cannot be updated in place'
+    }
+
+    # Updating something already present needs no approval, and Update-Module
+    # and Update-PSResource are the commands that say so. Install-Module -Force
+    # would also work and would read as an install.
+    It 'updates a present module with an update command, not an install' {
+        $script:MainSource | Should-MatchString 'Update-PSResource -Name \$name'
+        $script:MainSource | Should-MatchString 'Update-Module -Name \$name'
+    }
+
+    # The module is already loaded, so the files on disk are replaced and the
+    # cmdlets running now stay on the code in memory. Reporting it as though the
+    # run then benefits is the mistake this guards.
+    It 'says an update takes effect in the next session' {
+        $script:MainSource | Should-MatchString 'loads in the next session'
+    }
+
+    # There is no Update-PackageProvider, so moving a provider forward means
+    # running an install command against a binary provider assembly. It asks
+    # under the component that already covers the bootstrap.
+    It 'gates the provider refresh behind the NuGetProvider component' {
+        $script:MainSource | Should-MatchString "Approve-Install -Component 'NuGetProvider'[\s\S]{0,600}Install-PackageProvider -Name NuGet -Force"
+    }
+
+    It 'does not treat a gallery it could not reach as up to date' {
+        $script:MainSource | Should-MatchString 'the gallery could not be asked about it'
+    }
+
+    # Find-PackageProvider fails outright on PowerShell 7, which registers no
+    # provider bootstrap source. Reporting that as "current" would claim a
+    # machine is up to date on the strength of a lookup that never happened --
+    # the same mistake as above, in the branch that does not use the helper.
+    It 'does not treat a provider it could not look up as up to date' {
+        $script:MainSource | Should-MatchString 'no newer version could be looked up on this host'
     }
 }

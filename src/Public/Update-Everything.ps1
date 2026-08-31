@@ -108,6 +108,14 @@
                            2.x, which can accept module licenses and can see
                            modules installed by newer versions (AllUsers when
                            elevated, otherwise CurrentUser)
+          PSResourceGet    install Microsoft.PowerShell.PSResourceGet, the
+                           current gallery client. Changes which client every
+                           later module update uses (AllUsers when elevated,
+                           otherwise CurrentUser)
+
+        NuGetProvider also covers refreshing a provider that is already present.
+        There is no update command for a package provider, so moving one forward
+        means installing the newer version, and that asks.
 
         A scheduled task cannot prompt, so pass the approvals it should have:
             -AllowInstall PSWindowsUpdate,BurntToast
@@ -218,7 +226,7 @@
         [ValidateRange(1, 1440)]
         [int]    $DelayMinutes            = 60,
         [switch] $Notify,
-        [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet')]
+        [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30,
@@ -597,34 +605,130 @@
             }
         }
 
-        # Windows PowerShell ships PowerShellGet 1.0.0.1 and never updates it.
-        # Test-ParameterSupport keeps that version from failing the module step
-        # outright, but it cannot fix the deeper problem: v1 does not see modules
-        # installed by v2, so Update-Module on 5.1 quietly skips most of what is
-        # actually installed. Offer the upgrade rather than assuming it.
+        # This step sets trust and stops there. Moving PowerShellGet itself
+        # forward belongs to the Gallery tooling step below, which handles the
+        # 1.0.0.1 Windows ships as one case of a general rule rather than as a
+        # version comparison of its own.
+    }
+
+    # The tooling every other gallery step runs on. It is bootstrapped above when
+    # missing, but nothing until now brought it forward once present, so a
+    # machine could carry a years-old NuGet provider or a PowerShellGet 2.1 for
+    # as long as it lived. This runs before 'PowerShell modules' because that
+    # step is one of the things that depends on it.
+    Invoke-Step -Name 'Gallery tooling' -Action {
+        # Not admin-gated, and -Scope AllUsers fails without elevation, so the
+        # scope follows what the run actually has.
+        $scope = if ($isAdmin) { 'AllUsers' } else { 'CurrentUser' }
+
+        # --- NuGet package provider ------------------------------------------
         #
-        # Declining is not fatal here, unlike the NuGet provider above: trust has
-        # already been set, and the module step still runs on v1.
-        # Indexed rather than "| Select-Object -First 1": that halts the upstream
-        # pipeline, and inside a step action the transcript records the stop as a
-        # TerminatingError.
-        $psgetAll = @(Get-Module PowerShellGet -ListAvailable | Sort-Object Version -Descending)
-        $psget    = if ($psgetAll.Count) { $psgetAll[0] } else { $null }
+        # There is no Update-PackageProvider; Install-PackageProvider is the only
+        # way to move one forward. That makes the refresh an install command
+        # fetching a binary provider assembly, so it asks under the same
+        # 'NuGetProvider' component as the bootstrap rather than proceeding on
+        # the grounds that something is already there. Declining is not fatal:
+        # the provider that is present keeps working.
+        $nuget = @(Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue |
+            Sort-Object Version -Descending)
+        if (-not $nuget.Count) {
+            Write-Output 'No NuGet package provider is present; the Trust PSGallery step reports why.'
+        } else {
+            $current = $nuget[0].Version
+            $newest = $null
+            try {
+                $candidates = @(Find-PackageProvider -Name NuGet -ErrorAction Stop |
+                    Sort-Object Version -Descending)
+                if ($candidates.Count) { $newest = $candidates[0].Version }
+            } catch {
+                # PowerShell 7 registers no provider bootstrap source, so this
+                # cannot be answered there at all and fails with "No match was
+                # found". Windows PowerShell answers it. Neither is a fault, and
+                # the provider that is present keeps working either way, so the
+                # detail goes to the verbose stream rather than the summary.
+                Write-Verbose "Could not ask for the newest NuGet provider: $($_.Exception.Message)"
+            }
 
-        if ($psget -and $psget.Version -lt [version]'2.0.0') {
-            Write-Output "PowerShellGet $($psget.Version) is the version Windows ships."
+            if (-not $newest) {
+                # Not the same as up to date, and must not read like it.
+                Write-Output "NuGet package provider $current is installed; no newer version could be looked up on this host."
+            } elseif ($newest -gt $current) {
+                if (Approve-Install -Component 'NuGetProvider' -Approved $AllowInstall `
+                        -Description "The NuGet package provider is at $current and $newest is available. There is no update command for a provider, so this would install the newer one $(if ($isAdmin) { 'for all users on this machine' } else { 'for the current user only' }).") {
+                    $null = Install-PackageProvider -Name NuGet -Force -Scope $scope -ErrorAction Stop
+                    Write-Output "NuGet package provider $current -> $newest."
+                }
+            } else {
+                Write-Output "NuGet package provider $current is current."
+            }
+        }
 
-            # This step is not admin-gated, and -Scope AllUsers fails without
-            # elevation, so the scope follows what the run actually has.
-            $scope = if ($isAdmin) { 'AllUsers' } else { 'CurrentUser' }
-            $where = if ($isAdmin) { 'for all users on this machine' } else { 'for the current user only' }
+        # --- PowerShellGet and PSResourceGet ---------------------------------
+        #
+        # Three cases, and they are not the same decision:
+        #
+        #   absent                  an install, and asks
+        #   present but not ours    a copy the host shipped. Update-Module
+        #                           refuses it, so moving it forward is a
+        #                           side-by-side install, and asks
+        #   present and ours        an update, and does not ask
+        #
+        # The middle case is why the version alone is not the test. Windows
+        # PowerShell ships PowerShellGet 1.0.0.1 under Program Files rather than
+        # $PSHOME, and Update-Module answers "Module 'PowerShellGet' was not
+        # installed by using Install-Module, so it cannot be updated".
+        foreach ($tool in @(
+                @{ Module = 'PowerShellGet';                      Component = 'PowerShellGet' }
+                @{ Module = 'Microsoft.PowerShell.PSResourceGet'; Component = 'PSResourceGet' }
+            )) {
+            $name = $tool.Module
+            $status = Get-GalleryModuleStatus -Name $name
 
-            if (Approve-Install -Component 'PowerShellGet' -Approved $AllowInstall `
-                    -Description "PowerShellGet $($psget.Version) cannot accept module licenses and does not see modules installed by newer versions, so module updates on this host will miss most of what is installed. This would install PowerShellGet 2.x from the PowerShell Gallery $where.") {
+            if (-not $status.Available) {
+                $known = if ($status.Installed) { "$name $($status.Installed) is installed" } else { "$name is not installed" }
+                Write-Output "$known; the gallery could not be asked about it."
+                continue
+            }
 
-                Install-Module PowerShellGet -Force -AllowClobber -Scope $scope `
+            if ($status.Installed -and $status.Updatable -and -not $status.NeedsUpdate) {
+                Write-Output "$name $($status.Installed) is current."
+                continue
+            }
+
+            if ($status.Installed -and $status.Updatable) {
+                Write-Output "$name $($status.Installed) -> $($status.Available)..."
+                if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
+                    Update-PSResource -Name $name -TrustRepository -Confirm:$false -ErrorAction Stop
+                } else {
+                    Update-Module -Name $name -Force -Confirm:$false -ErrorAction Stop
+                }
+
+                # The same trap as -UpdateSelf: the module is already loaded, so
+                # the files on disk are replaced and the cmdlets running now stay
+                # on the code in memory.
+                Write-Output "$name updated. It loads in the next session; this run continues on the version already in memory."
+                continue
+            }
+
+            # Nothing left but an install: either absent, or a shipped copy that
+            # can only be replaced side by side.
+            if ($status.Installed -and $status.Installed -ge $status.Available) {
+                Write-Output "$name $($status.Installed) shipped with this host and is not behind the gallery; leaving it alone."
+                continue
+            }
+
+            $what = if ($status.Installed) {
+                "$name $($status.Installed) is the copy this PowerShell shipped with, which cannot be updated in place. Installing $($status.Available) alongside it is the only way forward"
+            } else {
+                "$name is not installed. It is the current PowerShell Gallery client, and installing it changes which client every later module update uses. This would install $($status.Available)"
+            }
+
+            if (Approve-Install -Component $tool.Component -Approved $AllowInstall `
+                    -Description "$what $(if ($isAdmin) { 'for all users on this machine' } else { 'for the current user only' }).") {
+
+                Install-Module -Name $name -Force -AllowClobber -Scope $scope `
                     -Confirm:$false -ErrorAction Stop
-                Write-Output "Installed PowerShellGet 2.x ($scope). It takes effect in the next session; this run continues on the version already loaded."
+                Write-Output "Installed $name $($status.Available) ($scope). It loads in the next session."
             }
         }
     }

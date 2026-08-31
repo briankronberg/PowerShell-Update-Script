@@ -129,7 +129,7 @@
 
         [bool] $Notify = $true,
 
-        [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet')]
+        [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
 
         [ValidateSet('Normal', 'Minimized', 'Hidden')]

@@ -24,7 +24,10 @@
     if (-not (Test-CanPrompt)) {
         # A scheduled run has nobody to ask, and silently installing software on
         # a machine nobody is watching is exactly what this gate exists to stop.
-        Write-Warning "$Component is not installed, and this run cannot prompt for consent. Re-run with -AllowInstall $Component (or -AllowInstall All) to permit it."
+        # "needs installing", not "is not installed": a component can also reach
+        # here when it is present in a form that cannot be updated in place, and
+        # replacing that is still an install.
+        Write-Warning "$Component needs installing, and this run cannot prompt for consent. Re-run with -AllowInstall $Component (or -AllowInstall All) to permit it."
         $script:InstallDecision[$Component] = $false
         return $false
     }
