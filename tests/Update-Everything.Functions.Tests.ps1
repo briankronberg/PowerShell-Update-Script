@@ -1885,3 +1885,192 @@ Describe 'Updating the module itself' -Tag 'Static' {
         $matches.Count | Should-BeGreaterThanOrEqual 2
     }
 }
+
+Describe 'Get-DeveloperToolCatalogue' -Tag 'Unit' {
+
+    BeforeAll { $script:Catalogue = @(Get-DeveloperToolCatalogue) }
+
+    It 'offers something to install' {
+        $script:Catalogue.Count | Should-BeGreaterThan 5
+    }
+
+    It 'gives every entry a name, an id, a command and a description' {
+        $incomplete = $script:Catalogue |
+            Where-Object { -not $_.Name -or -not $_.Id -or -not $_.Command -or -not $_.Description } |
+            ForEach-Object { $_.Name }
+
+        $incomplete | Should-BeNull
+    }
+
+    It 'uses each name once' {
+        $duplicates = $script:Catalogue | Group-Object Name | Where-Object Count -gt 1 | ForEach-Object Name
+        $duplicates | Should-BeNull
+    }
+
+    It 'uses each winget id once' {
+        $duplicates = $script:Catalogue | Group-Object Id | Where-Object Count -gt 1 | ForEach-Object Name
+        $duplicates | Should-BeNull
+    }
+
+    It 'reports whether each tool is already on the machine' {
+        $script:Catalogue[0].Present | Should-HaveType ([bool])
+    }
+
+    # winget has defaulted Microsoft.PowerShell to MSIX since 7.6, and Windows
+    # will not run an MSIX process elevated. The update step forces wix for the
+    # same reason.
+    It 'forces the MSI build of PowerShell 7' {
+        $pwsh = $script:Catalogue | Where-Object { $_.Id -eq 'Microsoft.PowerShell' }
+        $pwsh.InstallerType | Should-Be 'wix'
+    }
+}
+
+Describe 'Install-DeveloperTool' -Tag 'Unit' {
+
+    # The whole point of the decision recorded in the issue: -AllowInstall All
+    # must not reach the catalogue, or an unattended scheduled task quietly
+    # becomes a provisioning job.
+    It 'never consults the run-wide AllowInstall' {
+        $source = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Install-DeveloperTool.ps1') -Raw
+
+        $source | Should-NotMatchString '\$AllowInstall'
+    }
+
+    It 'passes the selection itself as the approval' {
+        $source = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Install-DeveloperTool.ps1') -Raw
+
+        $source | Should-MatchString 'Approve-Install -Component \$tool\.Name -Approved \$Name'
+    }
+
+    It 'refuses a name that is not in the catalogue' {
+        $result = Install-DeveloperTool -Name 'NotARealTool' -WarningAction SilentlyContinue
+        $result.Installed | Should-Be 0
+    }
+
+    It 'installs nothing for a name it refused' {
+        $result = Install-DeveloperTool -Name 'NotARealTool' -WarningAction SilentlyContinue
+        $result.Skipped | Should-Be 1
+    }
+
+    It 'skips a tool that is already on the machine' {
+        # PowerShell 7 is running these tests, so pwsh resolves.
+        $result = Install-DeveloperTool -Name 'PowerShell 7' -WarningAction SilentlyContinue 6>$null
+        $result.Installed | Should-Be 0
+        $result.Skipped   | Should-Be 1
+    }
+}
+
+Describe 'Initialize-UpdateEverything' -Tag 'Unit' {
+
+    It 'is exported by the manifest' {
+        $manifest = Import-PowerShellDataFile `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\UpdateEverything.psd1')
+
+        $manifest.FunctionsToExport | Should-ContainCollection 'Initialize-UpdateEverything'
+    }
+
+    It 'takes every menu option as a -Choice' {
+        $set = (Get-Command Initialize-UpdateEverything).Parameters['Choice'].Attributes |
+            Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] }
+
+        foreach ($key in 'Prerequisites', 'ScheduledTask', 'DeveloperTools', 'FirstRun') {
+            $set.ValidValues | Should-ContainCollection $key
+        }
+    }
+
+    # A session that cannot prompt would block on Read-Host until whatever is
+    # running it gives up.
+    It 'refuses to show a menu it cannot get an answer to' {
+        Mock Test-CanPrompt { $false }
+
+        $warnings = @()
+        Initialize-UpdateEverything -WarningVariable warnings -WarningAction SilentlyContinue
+
+        ($warnings -join ' ') | Should-MatchString 'interactive console'
+    }
+
+    It 'points at -Choice as the way through without a console' {
+        Mock Test-CanPrompt { $false }
+
+        $warnings = @()
+        Initialize-UpdateEverything -WarningVariable warnings -WarningAction SilentlyContinue
+
+        ($warnings -join ' ') | Should-MatchString '-Choice'
+    }
+
+    It 'does not reach the menu when -Choice is given' {
+        Mock Test-CanPrompt { $false }
+        Mock Invoke-SetupChoice { }
+
+        Initialize-UpdateEverything -Choice DeveloperTools -WarningAction SilentlyContinue
+
+        Should-Invoke Invoke-SetupChoice -ParameterFilter { $Key -eq 'DeveloperTools' }
+    }
+}
+
+Describe 'The setup menu loop' -Tag 'Unit' {
+
+    # Read-Host is mocked rather than piped. Piping makes Test-CanPrompt refuse
+    # the menu outright -- correctly, since a redirected session cannot answer --
+    # so the loop itself can only be reached with a mock.
+
+    BeforeEach {
+        Mock Test-CanPrompt { $true }
+        Mock Invoke-SetupChoice { }
+        Mock Write-Host { }
+    }
+
+    It 'exits on 5 without taking any option' {
+        Mock Read-Host { '5' }
+
+        Initialize-UpdateEverything
+
+        Should-NotInvoke Invoke-SetupChoice
+    }
+
+    It 'takes the option matching the number typed' {
+        $script:answers = @('3', '5')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        Initialize-UpdateEverything
+
+        Should-Invoke Invoke-SetupChoice -ParameterFilter { $Key -eq 'DeveloperTools' }
+    }
+
+    # A typo must not end the session or take an option nobody asked for.
+    It 'asks again after an answer that is not an option' {
+        $script:answers = @('99', 'x', '5')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        Initialize-UpdateEverything
+
+        Should-NotInvoke Invoke-SetupChoice
+        $script:next | Should-Be 3
+    }
+
+    # Setting a task up and then running for the first time is two answers, not
+    # two sessions.
+    It 'keeps offering the menu until told to stop' {
+        $script:answers = @('1', '4', '5')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        Initialize-UpdateEverything
+
+        Should-Invoke Invoke-SetupChoice -Times 2 -Exactly
+    }
+
+    It 'ignores whitespace around the answer' {
+        $script:answers = @('  2  ', '5')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        Initialize-UpdateEverything
+
+        Should-Invoke Invoke-SetupChoice -ParameterFilter { $Key -eq 'ScheduledTask' }
+    }
+}

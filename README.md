@@ -104,12 +104,70 @@ other runs. Check with `Get-ExecutionPolicy -List`.
 | Command | Does |
 |---|---|
 | `Update-Everything` | Runs the update pass and returns a result object |
+| `Initialize-UpdateEverything` | Setup menu: prerequisites, scheduled task, developer tools, first run |
 | `Register-UpdateEverythingTask` | Registers the scheduled task. Needs elevation |
 | `Get-UpdateEverythingTask` | Reports the registered task, or nothing if there is none |
 | `Unregister-UpdateEverythingTask` | Removes the task |
 | `Test-PendingReboot` | Reports whether Windows is waiting on a restart, and why |
 
 `Update-All` is an alias for `Update-Everything`.
+
+## Setting up
+
+```powershell
+Initialize-UpdateEverything
+```
+
+A menu, for a machine that has just had the module installed:
+
+```
+UpdateEverything setup
+
+  1. Run prerequisites only (PowerShell 7, notifications, gallery tooling)
+  2. Set up a scheduled task
+  3. Install developer tools
+  4. Perform a full first run
+  5. Exit
+
+Choose [1-5]:
+```
+
+Typed numbers rather than arrow keys, so it needs no extra module, works over a
+remote session and in a host with no cursor control, and can be tested without
+simulating key events. The menu repeats until you choose Exit.
+
+`-Choice` takes one option and returns, for a caller that already knows what it
+wants:
+
+```powershell
+Initialize-UpdateEverything -Choice DeveloperTools
+```
+
+### Developer tools
+
+Option 3 is the one deliberate exception to "this module updates, it does not
+install". On a fresh machine the honest first question is why nothing is
+installed, and the answer is a script everyone writes once and badly.
+
+```
+  1. Git                           Version control
+  2. Python                        Python, through the Install Manager this module updates
+  3. Node.js LTS                   JavaScript runtime, with npm
+  4. VS Code                       Editor
+  5. Windows Terminal              Terminal this module can set a default profile on
+  6. PowerShell 7      installed   PowerShell 7, MSI build so it can elevate
+  ...
+```
+
+You pick numbers; nothing else is installed. A tool already on PATH is marked
+and skipped, because the update run covers it from then on.
+
+**The catalogue is not an `-AllowInstall` component, and `-AllowInstall All`
+cannot reach it.** `All` means "approve the components this update run needs" —
+six named things, each a prerequisite for updating something else. Letting it
+also mean "install a dozen developer tools" would turn an unattended scheduled
+task from a maintenance job into a provisioning one, through a flag people
+already have in their task definitions.
 
 ## Running it
 
