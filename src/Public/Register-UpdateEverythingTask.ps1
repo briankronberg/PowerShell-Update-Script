@@ -132,6 +132,15 @@
         [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
 
+        # Passed straight through to the run this task performs, so one machine
+        # can carry a daily task that skips a toolchain and a monthly one that
+        # updates only that toolchain.
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self')]
+        [string[]] $Tag = @(),
+
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self')]
+        [string[]] $ExcludeTag = @(),
+
         [ValidateSet('Normal', 'Minimized', 'Hidden')]
         [string] $WindowStyle = 'Normal',
 
@@ -169,7 +178,8 @@
     $arguments = Get-UpdateTaskArgument -ModuleRoot $script:ModuleRoot -Notify $Notify `
         -WindowStyle $effectiveWindowStyle -PromptBeforeRun:$PromptBeforeRun `
         -PromptTimeoutSeconds $PromptTimeoutSeconds `
-        -AllowInstall $AllowInstall -ExtraArgument $ExtraArgument
+        -AllowInstall $AllowInstall -Tag $Tag -ExcludeTag $ExcludeTag `
+        -ExtraArgument $ExtraArgument
 
     $action = New-ScheduledTaskAction -Execute (Get-PowerShellHostPath) -Argument $arguments
 

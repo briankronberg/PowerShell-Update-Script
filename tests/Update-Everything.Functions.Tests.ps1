@@ -1473,3 +1473,157 @@ Describe 'The Gallery tooling step' -Tag 'Static' {
         $script:MainSource | Should-MatchString 'no newer version could be looked up on this host'
     }
 }
+
+Describe 'Test-StepTagMatch' -Tag 'Unit' {
+
+    Context 'No filter' {
+
+        # @($null) has a Count of 1 in PowerShell, so counting a filter without
+        # first stripping nulls reads an unset one as "one entry, matching
+        # nothing" -- which skipped every step in the run.
+        It 'runs a step when both filters are null' {
+            Test-StepTagMatch -StepTag @('Python') -Tag $null -ExcludeTag $null | Should-BeTrue
+        }
+
+        It 'runs a step when both filters are empty' {
+            Test-StepTagMatch -StepTag @('Python') | Should-BeTrue
+        }
+
+        It 'runs an untagged step when there is no filter' {
+            Test-StepTagMatch -StepTag @() | Should-BeTrue
+        }
+    }
+
+    Context '-Tag selects' {
+
+        It 'runs a step carrying the tag' {
+            Test-StepTagMatch -StepTag @('Python') -Tag @('Python') | Should-BeTrue
+        }
+
+        It 'runs a step carrying one of several tags' {
+            Test-StepTagMatch -StepTag @('Windows', 'PackageManager') -Tag @('PackageManager') | Should-BeTrue
+        }
+
+        It 'skips a step carrying none of them' {
+            Test-StepTagMatch -StepTag @('Node') -Tag @('Python') | Should-BeFalse
+        }
+
+        # Asking for Python and receiving a step that claims no subject at all
+        # would make the filter meaningless.
+        It 'skips an untagged step when a tag was asked for' {
+            Test-StepTagMatch -StepTag @() -Tag @('Python') | Should-BeFalse
+        }
+    }
+
+    Context '-ExcludeTag refuses' {
+
+        It 'skips a step carrying the excluded tag' {
+            Test-StepTagMatch -StepTag @('Python') -ExcludeTag @('Python') | Should-BeFalse
+        }
+
+        It 'runs a step carrying none of them' {
+            Test-StepTagMatch -StepTag @('Node') -ExcludeTag @('Python') | Should-BeTrue
+        }
+
+        It 'runs an untagged step' {
+            Test-StepTagMatch -StepTag @() -ExcludeTag @('Python') | Should-BeTrue
+        }
+
+        It 'skips a step that carries the excluded tag among others' {
+            Test-StepTagMatch -StepTag @('Windows', 'Microsoft') -ExcludeTag @('Microsoft') | Should-BeFalse
+        }
+    }
+
+    Context 'Both at once' {
+
+        # Not a contradiction: the pair is how one task takes everything in a
+        # subject except one part of it.
+        It 'runs a step selected by -Tag and not excluded' {
+            Test-StepTagMatch -StepTag @('Python') -Tag @('Python') -ExcludeTag @('Node') | Should-BeTrue
+        }
+
+        It 'lets exclusion win over selection' {
+            Test-StepTagMatch -StepTag @('Python') -Tag @('Python') -ExcludeTag @('Python') | Should-BeFalse
+        }
+    }
+}
+
+Describe 'Every step declares a tag' -Tag 'Static' {
+
+    # A step with no tag is invisible to -Tag and unstoppable by -ExcludeTag, so
+    # it would quietly run in every filtered run. The ValidateSet is the other
+    # half: a tag no step carries selects nothing, and a typo would.
+
+    BeforeAll {
+        $script:MainPath = Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1'
+        $script:MainAst = [System.Management.Automation.Language.Parser]::ParseFile(
+            $script:MainPath, [ref] $null, [ref] $null)
+
+        $script:StepTags = @{}
+        foreach ($call in $script:MainAst.FindAll({
+                    param($n)
+                    $n -is [System.Management.Automation.Language.CommandAst] -and
+                    $n.GetCommandName() -eq 'Invoke-Step'
+                }, $true)) {
+
+            $elements = $call.CommandElements
+            $name = $null
+            $tags = @()
+            for ($i = 0; $i -lt $elements.Count; $i++) {
+                if ($elements[$i] -isnot [System.Management.Automation.Language.CommandParameterAst]) { continue }
+                switch ($elements[$i].ParameterName) {
+                    'Name' { if ($i + 1 -lt $elements.Count) { $name = $elements[$i + 1].Value } }
+                    'Tag'  {
+                        if ($i + 1 -lt $elements.Count) {
+                            $tags = @($elements[$i + 1].Extent.Text -split ',' |
+                                ForEach-Object { $_.Trim().Trim("'", '"') })
+                        }
+                    }
+                }
+            }
+            if ($name) { $script:StepTags[$name] = $tags }
+        }
+
+        # The set both public entry points validate against.
+        $script:DeclaredTags = @('Windows', 'Microsoft', 'PowerShell', 'PackageManager',
+                                 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self')
+    }
+
+    It 'found the steps to check' {
+        $script:StepTags.Count | Should-BeGreaterThan 20
+    }
+
+    It 'gives every step at least one tag' {
+        $untagged = $script:StepTags.GetEnumerator() |
+            Where-Object { -not $_.Value -or -not @($_.Value | Where-Object { $_ }).Count } |
+            ForEach-Object { $_.Key }
+
+        $untagged | Should-BeNull -Because "these run in every filtered run and cannot be excluded:`n$($untagged -join "`n")"
+    }
+
+    It 'uses only tags the ValidateSet accepts' {
+        $unknown = $script:StepTags.GetEnumerator() |
+            ForEach-Object {
+                $step = $_.Key
+                $_.Value | Where-Object { $_ -and $_ -notin $script:DeclaredTags } |
+                    ForEach-Object { "$step -> $_" }
+            }
+
+        $unknown | Should-BeNull -Because "a tag outside the ValidateSet can never be asked for:`n$($unknown -join "`n")"
+    }
+
+    It 'declares no tag that no step carries' {
+        $used = $script:StepTags.Values | ForEach-Object { $_ } | Where-Object { $_ } | Select-Object -Unique
+        $orphans = $script:DeclaredTags | Where-Object { $_ -notin $used }
+
+        $orphans | Should-BeNull -Because "these select nothing, so asking for one runs an empty pass: $($orphans -join ', ')"
+    }
+
+    It 'accepts -<_> on both entry points' -ForEach @('Tag', 'ExcludeTag') {
+        $parameter = $_
+        foreach ($file in 'src\Public\Update-Everything.ps1', 'src\Public\Register-UpdateEverythingTask.ps1') {
+            Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) $file) -Raw |
+                Should-MatchString "\`$$parameter = @\(\)"
+        }
+    }
+}

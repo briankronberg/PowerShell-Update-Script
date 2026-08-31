@@ -8,9 +8,24 @@
         # skipped with the reason rather than left to fail with a permissions
         # error that reads like a bug.
         [switch]                            $RequiresAdmin,
+        # What this step is about, for -Tag and -ExcludeTag. Declared on the call
+        # rather than in a table elsewhere, so a tag and its step cannot drift.
+        [string[]]                          $Tag = @(),
         # Native exit codes this step should treat as success.
         [int[]]                             $AllowedExitCodes = @()
     )
+
+    # Tag filter first: a step the caller excluded should not even be checked for
+    # administrator rights or for its tool, because neither is why it is skipped.
+    if (-not (Test-StepTagMatch -StepTag $Tag -Tag $script:TagFilter -ExcludeTag $script:ExcludeTagFilter)) {
+        $reason = if (@($script:TagFilter).Count) {
+            "does not match -Tag $($script:TagFilter -join ',')"
+        } else {
+            "excluded by -ExcludeTag $($script:ExcludeTagFilter -join ',')"
+        }
+        Add-SkippedStep -Name $Name -Reason $reason
+        return
+    }
 
     # Step names carry spaces, parens and '=' -- legal on NTFS but awkward on
     # disk. The run stamp keeps each run's step logs together and stops any one

@@ -29,6 +29,10 @@ function Get-UpdateTaskArgument {
 
         [string[]] $AllowInstall = @(),
 
+        [string[]] $Tag = @(),
+
+        [string[]] $ExcludeTag = @(),
+
         [string[]] $ExtraArgument = @()
     )
 
@@ -37,6 +41,11 @@ function Get-UpdateTaskArgument {
     if ($PromptBeforeRun) { $call += " -PromptBeforeRun -PromptTimeoutSeconds $PromptTimeoutSeconds" }
     if ($AllowInstall) {
         $call += ' -AllowInstall ' + (($AllowInstall | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ',')
+    }
+    foreach ($set in @(@{ Name = 'Tag'; Value = $Tag }, @{ Name = 'ExcludeTag'; Value = $ExcludeTag })) {
+        if ($set.Value) {
+            $call += " -$($set.Name) " + (($set.Value | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ',')
+        }
     }
     if ($ExtraArgument) { $call += ' ' + ($ExtraArgument -join ' ') }
 
