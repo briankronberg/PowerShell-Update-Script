@@ -1021,7 +1021,12 @@ Describe 'No step updates through a tool it has not verified' -Tag 'Static','Mod
             'Trust PSGallery', 'PowerShell modules', 'PowerShell help',
             'Windows Update', 'Windows Terminal default = PowerShell 7',
             # Invoke-WebRequest is built in and powershell.exe is always there.
-            'UpdateEverything (self)'
+            'UpdateEverything (self)',
+            # PackageManagement and PowerShellGet ship with every supported
+            # Windows, so Get-PackageProvider and Find-Module always resolve.
+            # The step reports each component it did not find rather than
+            # driving anything it has not confirmed.
+            'Gallery tooling'
         )
 
         $offenders = foreach ($call in $ast.FindAll({

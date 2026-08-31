@@ -50,6 +50,16 @@ The assertions this suite uses, all of which exist:
 `Should-BeOfType` and `Should-NotBeNullOrEmpty` do **not** exist in Pester 6.
 Reach for `Should-HaveType` and `Should-NotBeEmptyString`.
 
+There is no `Should-NotThrow` either — only `Should-Throw`. To assert that
+something does not throw, call it and assert on what it returned; a test that
+inspects the result has already proved it.
+
+Check a name before reaching for it rather than after:
+
+```powershell
+(Get-Command -Module Pester -Name 'Should-*').Name
+```
+
 **PowerShell 7 from the MSI, not the Store.** The MSIX build cannot be elevated,
 cannot use in-process COM (the DISM cmdlets fail with "Class not registered"),
 and its path carries a version stamp that a scheduled task cannot rely on. The
