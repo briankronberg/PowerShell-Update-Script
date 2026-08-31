@@ -139,6 +139,25 @@
         The reason is repeated in the closing summary, because by then the original
         warning has scrolled well out of sight.
 
+    .PARAMETER UpdateSelf
+        Reinstall this module from GitHub before doing anything else, whether or
+        not the installed version differs. Default: $false.
+
+        The version does not move with every commit and the module is
+        distributed from a branch rather than the PowerShell Gallery, so
+        "already 1.0.0" is the normal state of an out-of-date copy. This is what
+        makes tracking main practical.
+
+        It takes effect on the *next* run. Unlike winget, which is a fresh
+        process every step, this module is already loaded by the time it runs:
+        the files on disk are replaced, and the functions executing now stay on
+        the code already in memory.
+
+        Off by default, and deliberately. It fetches and runs an installer from
+        a branch, which is a supply-chain decision rather than a routine update,
+        and a scheduled task that quietly followed main would be making that
+        decision every week on its own.
+
     .PARAMETER LogRetentionDays
         Delete logs and settings.json backups in the log directory older than this
         many days. Default: 30. Set to 0 to keep everything.
@@ -191,7 +210,8 @@
         [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet')]
         [string[]] $AllowInstall = @(),
         [ValidateRange(0, 3650)]
-        [int]    $LogRetentionDays       = 30
+        [int]    $LogRetentionDays       = 30,
+        [switch] $UpdateSelf
     )
 
     # $script:, not a plain local. As a script these lived at script scope and
@@ -353,6 +373,46 @@
     $WingetNothingToDo = @(-1978335189, -1978335212)
 
     Write-Host "Maintenance run started $(Get-Date)  |  Admin: $isAdmin  |  Main Log: $mainLog" -ForegroundColor Green
+
+    # ---------------------------------------------------------------------------
+    # 1b. The module itself
+    # ---------------------------------------------------------------------------
+    if ($UpdateSelf) {
+        Invoke-Step -Name 'UpdateEverything (self)' -Action {
+            # Reinstalls whether or not the version differs. The version does not
+            # move with every commit and the module is distributed from a branch
+            # rather than the gallery, so "already 1.0.0" is the normal state of
+            # an out-of-date copy and is no reason to skip.
+            $uri = 'https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1'
+            $installer = Join-Path ([System.IO.Path]::GetTempPath()) "Install-UpdateEverything-$script:runStamp.ps1"
+
+            try {
+                Write-Output "Fetching the installer from $uri"
+                Invoke-WebRequest -Uri $uri -OutFile $installer -UseBasicParsing -ErrorAction Stop
+                Unblock-File -LiteralPath $installer -ErrorAction SilentlyContinue
+
+                # In a child process, and powershell rather than the current
+                # host: the installer imports the module when it finishes, and
+                # doing that inside the session currently running a function
+                # from that module is asking for trouble. powershell.exe is also
+                # always present, which pwsh is not.
+                & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Force
+                if ($LASTEXITCODE -ne 0) {
+                    throw "The installer exited with code $LASTEXITCODE."
+                }
+
+                # Said plainly, because the obvious assumption is wrong. Unlike
+                # winget, which is a fresh process every step, this module is
+                # already loaded: the functions running now stay on the old code
+                # however new the files on disk are.
+                Write-Output 'Updated. The new version loads on the next run; this one continues on the code already in memory.'
+            } finally {
+                Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
+            }
+        }
+    } else {
+        Add-SkippedStep -Name 'UpdateEverything (self)' -Reason 'not requested (-UpdateSelf)'
+    }
 
     # ---------------------------------------------------------------------------
     # 2. winget (apps from winget + Microsoft Store sources)
