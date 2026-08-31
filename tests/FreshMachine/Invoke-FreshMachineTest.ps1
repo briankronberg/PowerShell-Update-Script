@@ -199,17 +199,28 @@ $result = Get-Content -LiteralPath $resultFile -Raw | ConvertFrom-Json
 
 Write-Host ''
 foreach ($check in $result.Checks) {
-    $colour = if ($check.Passed) { 'Green' } else { 'Red' }
-    $mark   = if ($check.Passed) { 'PASS' } else { 'FAIL' }
-    Write-Host ("  [{0}] {1}" -f $mark, $check.Name) -ForegroundColor $colour
+    # Three states, not two. A check the machine could not run is not a failure
+    # and must not be coloured like one.
+    $colour = switch ($check.Status) {
+        'PASS'  { 'Green' }
+        'FAIL'  { 'Red' }
+        default { 'DarkYellow' }
+    }
+    Write-Host ("  [{0}] {1}" -f $check.Status.PadRight(4), $check.Name) -ForegroundColor $colour
     if ($check.Detail) { Write-Host "         $($check.Detail)" -ForegroundColor DarkGray }
 }
 
 Write-Host ''
-if ($result.Passed) {
-    Write-Host 'Fresh-machine test passed.' -ForegroundColor Green
-} else {
+if (-not $result.Passed) {
     Write-Host 'Fresh-machine test FAILED.' -ForegroundColor Red
+} elseif ($result.NotCovered -gt 0) {
+    # Said plainly rather than buried. A green run that skipped the elevation
+    # checks proves less than a green run that made them, and the difference
+    # matters most to whoever is deciding whether it is safe to release.
+    Write-Host 'Fresh-machine test passed.' -ForegroundColor Green
+    Write-Host "$($result.NotCovered) check(s) could not run on this machine; see N/A above for why." -ForegroundColor DarkYellow
+} else {
+    Write-Host 'Fresh-machine test passed, with everything covered.' -ForegroundColor Green
 }
 Write-Host "Logs and transcripts: $OutputPath"
 
