@@ -1,0 +1,76 @@
+name: Feature request
+description: Something it should do and does not
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The fields below are the ones that are hard to reconstruct later. Fill in
+        what you know; an idea recorded roughly beats one not recorded.
+
+  - type: textarea
+    id: what
+    attributes:
+      label: What it should do
+      description: The behaviour, from the outside. A command line or a snippet of output says it faster than a paragraph.
+      placeholder: |
+        Update-Everything -Tag Python
+
+        Runs only the steps tagged Python and reports the rest as skipped.
+    validations:
+      required: true
+
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: |
+        The problem it solves, not the solution restated. This is the field
+        worth the most in six months, when the "what" still makes sense and the
+        reason for it has gone.
+      placeholder: |
+        Some tools want to be absolutely current and others want holding back,
+        because they are a prerequisite for an app this tool does not know
+        about. Today the run is all or nothing.
+    validations:
+      required: true
+
+  - type: textarea
+    id: depends
+    attributes:
+      label: Depends on
+      description: Issues that have to land first, and why. Leave blank if nothing.
+      placeholder: "#18 — the parameters cannot be expressed until steps can be selected by tag."
+
+  - type: textarea
+    id: open
+    attributes:
+      label: Open questions
+      description: Decisions you have not made. Recording them stops them being re-argued, or worse, silently decided by whoever implements it.
+      placeholder: |
+        Should an unknown tag fail loudly, or match nothing?
+
+  - type: dropdown
+    id: installs
+    attributes:
+      label: Would this install anything
+      description: |
+        Anything that installs software for the first time goes through
+        `Approve-Install`. A change that installs something silently will not be
+        merged, however convenient — see CONTRIBUTING.md.
+      options:
+        - "No"
+        - "Yes — and it should go through -AllowInstall"
+        - "Yes — and it needs a new consent path"
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: admin
+    attributes:
+      label: Would this need administrator rights
+      options:
+        - "No"
+        - "Yes — the step should be marked -RequiresAdmin"
+        - Not sure
