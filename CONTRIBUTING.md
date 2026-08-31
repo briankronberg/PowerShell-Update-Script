@@ -189,6 +189,17 @@ session, which is not the module's to change. `Install.ps1`, `Publish.ps1` and
 `test.ps1` do set it, because they own their session. The pre-PR checklist
 rejects it in `src`.
 
+`Invoke-Step` is the one exception, and it runs the other way: it sets
+`Continue`, **function-locally**, before invoking a step action. A caller who
+prefers `Stop` makes a native command's stderr terminating, and these steps drive
+tools that write to stderr as a matter of course — npm its deprecation notices,
+winget its progress, `wsl` its "not installed" message. Each such step then threw
+before reaching the exit-code check written to handle precisely that, so the
+run's result depended on a preference set outside it. A function-local assignment
+cannot reach the caller's session, which is what the rule protects; a `global:`
+or `script:` one can, and a separate test rejects those everywhere including
+there.
+
 **`Set-StrictMode -Version Latest` — not in the module.** It makes reading a
 missing property fatal, and the module has to probe for optional keys in
 Windows Terminal's `settings.json`, where they are frequently absent. Turning

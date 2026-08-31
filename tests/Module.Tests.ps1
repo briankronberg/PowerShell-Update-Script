@@ -246,7 +246,17 @@ Describe 'Module source layout' -Tag 'Static','Module' {
     # scope whether or not that was wanted. The per-call -ErrorAction Stop next to
     # the try/catch is the version that only affects the call it is on.
     # Install.ps1, Publish.ps1 and test.ps1 do set it. They own their session.
+    #
+    # Invoke-Step is the documented exception, and only for a function-local
+    # assignment. It sets Continue before invoking a step action, in the other
+    # direction: a caller that prefers Stop makes a native command's stderr
+    # terminating, and most steps drive tools that write to stderr routinely, so
+    # each would throw before reaching the exit-code check written to handle it.
+    # A function-local assignment cannot reach the caller's session, which is what
+    # this rule protects.
     It 'never assigns $ErrorActionPreference, which belongs to the caller' {
+        $localAllowed = 'Invoke-Step.ps1'
+
         $offenders = foreach ($file in Get-ChildItem (Join-Path $script:ModuleRoot 'Public'), (Join-Path $script:ModuleRoot 'Private') -Filter *.ps1) {
             $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref] $null, [ref] $null)
             foreach ($assignment in $ast.FindAll({
@@ -255,11 +265,33 @@ Describe 'Module source layout' -Tag 'Static','Module' {
                         $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
                         $node.Left.VariablePath.UserPath -match '^(global:|script:)?ErrorActionPreference$'
                     }, $true)) {
+
+                $scoped = $assignment.Left.VariablePath.UserPath -match '^(global:|script:)'
+                if (-not $scoped -and $file.Name -eq $localAllowed) { continue }
+
                 "$($file.Name):$($assignment.Extent.StartLineNumber)"
             }
         }
 
         $offenders | Should-BeNull -Because "these change the importing session's preference:`n$($offenders -join "`n")"
+    }
+
+    # The allowance above is for a function-local assignment only. A global: or
+    # script: one leaks to the caller wherever it is written, including here.
+    It 'never assigns it at global or script scope, not even where local is allowed' {
+        $offenders = foreach ($file in Get-ChildItem (Join-Path $script:ModuleRoot 'Public'), (Join-Path $script:ModuleRoot 'Private') -Filter *.ps1) {
+            $ast = [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref] $null, [ref] $null)
+            foreach ($assignment in $ast.FindAll({
+                        param($node)
+                        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+                        $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and
+                        $node.Left.VariablePath.UserPath -match '^(global:|script:)ErrorActionPreference$'
+                    }, $true)) {
+                "$($file.Name):$($assignment.Extent.StartLineNumber)"
+            }
+        }
+
+        $offenders | Should-BeNull
     }
 
     # A catch that swallows in silence is indistinguishable from one that never

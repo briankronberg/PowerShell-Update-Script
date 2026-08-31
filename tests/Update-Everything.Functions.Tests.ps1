@@ -2111,3 +2111,67 @@ Describe 'The first run points at the setup menu' -Tag 'Static' {
         $script:FirstRunSource | Should-MatchString 'if \(\$isFirstRun\)'
     }
 }
+
+Describe 'A step survives a caller who prefers Stop' -Tag 'Unit' {
+
+    # Found by the fresh-machine smoke test, which is the first thing to run this
+    # module from a session that sets ErrorActionPreference = Stop, on a machine
+    # where WSL genuinely is not installed:
+    #
+    #   PS>TerminatingError(wsl.exe): "...ErrorActionPreference... is set to
+    #   Stop: The Windows Subsystem for Linux is not installed."
+    #   WARNING: FAILED: WSL kernel
+    #
+    # The step is written to handle exactly that machine and never got the
+    # chance: wsl writes to stderr, Stop makes a native command's stderr
+    # terminating, and the throw beat the exit-code check. npm, winget and dotnet
+    # all write to stderr routinely, so this was never only about WSL.
+
+    BeforeEach {
+        $script:logDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $script:logDir -Force
+        $script:runStamp = 'eap'
+        $script:isAdmin = $true
+        $script:Results = [System.Collections.Generic.List[object]]::new()
+        $script:TagFilter = @()
+        $script:ExcludeTagFilter = @()
+    }
+
+    It 'reports a native command by its exit code, not by its stderr' {
+        $ErrorActionPreference = 'Stop'
+
+        Invoke-Step -Name 'noisy' -Action {
+            & cmd.exe /c 'echo something on stderr 1>&2 & exit 0'
+        } 6>$null
+
+        $script:Results[0].Status | Should-Be 'OK'
+    }
+
+    It 'still fails a step whose command exits non-zero' {
+        $ErrorActionPreference = 'Stop'
+
+        Invoke-Step -Name 'broken' -Action {
+            & cmd.exe /c 'echo bad 1>&2 & exit 3'
+        } 6>$null
+
+        $script:Results[0].Status | Should-Be 'Failed'
+    }
+
+    # The preference is set inside Invoke-Step's own scope. If it leaked, the
+    # caller would silently stop getting terminating errors it asked for.
+    It 'leaves the caller preference alone' {
+        $ErrorActionPreference = 'Stop'
+
+        Invoke-Step -Name 'quiet' -Action { 'x' } 6>$null
+
+        $ErrorActionPreference | Should-Be 'Stop'
+    }
+
+    It 'still counts a PowerShell error record as a warning' {
+        $ErrorActionPreference = 'Stop'
+
+        Invoke-Step -Name 'writes-error' -Action { Write-Error 'a real one' } 6>$null
+
+        $script:Results[0].Status | Should-Be 'Warning'
+    }
+}
