@@ -57,6 +57,12 @@ BeforeDiscovery {
     $LintTargets += (Join-Path $ModuleRoot 'UpdateEverything.psm1')
     $LintTargets += (Join-Path $RepoRoot 'test.ps1')
     $LintTargets += (Join-Path $RepoRoot 'Install.ps1')
+
+    # The fresh-machine harness. Pester never runs these -- it discovers
+    # *.Tests.ps1 only -- but they are the house style's problem like anything
+    # else, and nothing else in the suite would look at them.
+    $LintTargets += @(Get-ChildItem -Path (Join-Path $RepoRoot 'tests\FreshMachine') -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue |
+            ForEach-Object { $_.FullName })
 }
 
 BeforeAll {
