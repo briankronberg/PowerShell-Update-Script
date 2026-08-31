@@ -113,7 +113,15 @@
         # console nobody is reading after an unattended run.
         return $child.ExitCode
     } catch {
-        # Declining the UAC prompt throws here.
-        throw "Elevation was declined or failed: $($_.Exception.Message). Re-run with -SkipElevation to proceed without admin."
+        # Declining the UAC prompt throws here, and so does a policy that
+        # refuses the request before anyone sees one. Those look identical from
+        # here, so the message says which values are set rather than guessing
+        # between them. Nothing is added on a machine where none of them is.
+        $message = "Elevation was declined or failed: $($_.Exception.Message)."
+
+        $policyNote = Get-ElevationPolicyNote
+        if ($policyNote) { $message += " $policyNote" }
+
+        throw "$message Re-run with -SkipElevation to proceed without admin."
     }
 }

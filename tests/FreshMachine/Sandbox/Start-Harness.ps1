@@ -103,10 +103,15 @@ try {
         Write-Output "-- install attempt $attempt --"
         $installLog = Join-Path $OutputPath "install-$attempt.log"
 
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $command *> $installLog
+        # Captured, then written with an explicit encoding. "*> file" is
+        # Out-File, which writes UTF-16LE on Windows PowerShell -- the same
+        # split that made the module's own step logs unreadable, reintroduced
+        # here on the first attempt.
+        $installOutput = & powershell.exe -NoProfile -ExecutionPolicy Bypass -Command $command *>&1
         $code = $LASTEXITCODE
 
-        $text = Get-Content $installLog -Raw
+        $text = ($installOutput | Out-String)
+        [System.IO.File]::WriteAllText($installLog, $text, [System.Text.UTF8Encoding]::new($false))
         $ok = ($code -eq 0) -and ($text -match 'Installed UpdateEverything')
         Add-Check -Name "install succeeds (attempt $attempt)" -Passed $ok -Detail "exit $code"
         Write-Output ($text -split "`r?`n" | Select-Object -Last 12 | ForEach-Object { "    $_" })
@@ -122,12 +127,25 @@ try {
 
     # A scheduled task at RunLevel Limited is how an elevated session starts a
     # genuinely unelevated child of the same user.
+    #
+    # -NonInteractive is not decoration, and leaving it out hung the first run of
+    # this harness for as long as it was given. A fresh machine has no NuGet
+    # provider, so Trust PSGallery asks permission to install one -- and
+    # Test-CanPrompt says yes, because a task at RunLevel Limited reports
+    # UserInteractive with stdin not redirected. The prompt then waits on a
+    # window nobody is looking at.
+    #
+    # With -NonInteractive, PromptForChoice throws instead, which is the case
+    # Request-InstallConsent already catches and treats as declined. Measured:
+    #
+    #   without : CanPrompt=True  PromptForChoice blocks
+    #   with    : CanPrompt=True  PromptForChoice throws MethodInvocationException
     $runResult = Join-Path $OutputPath 'unelevated.json'
     $payload   = Join-Path $PSScriptRoot 'Invoke-UnelevatedRun.ps1'
 
     $taskName = 'UpdateEverything-SmokeTest'
     $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
-        -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$payload`" -ResultPath `"$runResult`""
+        -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$payload`" -ResultPath `"$runResult`""
     $taskPrincipal = New-ScheduledTaskPrincipal `
         -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) `
         -LogonType Interactive `

@@ -826,6 +826,73 @@ Describe 'The gallery steps never splat a parameter blindly' -Tag 'Static' {
     }
 }
 
+Describe 'Get-ElevationPolicyNote' -Tag 'Unit','Security' {
+
+    # "Elevation was declined or failed" is true and useless on a managed
+    # machine. This names the value that did it. It reports and never decides:
+    # refusing a run over these would lock out exactly the people they affect,
+    # because Test-AdministratorGroupMember already answers $null when a
+    # filtered token hides the Administrators SID.
+
+    It 'says nothing on a machine with no restrictive policy' {
+        Mock Get-ItemProperty { [pscustomobject]@{ EnableLUA = 1; ConsentPromptBehaviorAdmin = 2 } }
+        Get-ElevationPolicyNote | Should-BeNull
+    }
+
+    It 'says nothing when the policy key cannot be read' {
+        Mock Get-ItemProperty { }
+        Get-ElevationPolicyNote | Should-BeNull
+    }
+
+    It 'names a standard-user denial' {
+        Mock Get-ItemProperty { [pscustomobject]@{ ConsentPromptBehaviorUser = 0 } }
+        Get-ElevationPolicyNote | Should-MatchString 'ConsentPromptBehaviorUser is 0'
+    }
+
+    It 'names UAC being switched off' {
+        Mock Get-ItemProperty { [pscustomobject]@{ EnableLUA = 0 } }
+        Get-ElevationPolicyNote | Should-MatchString 'EnableLUA is 0'
+    }
+
+    It 'names a signature requirement' {
+        Mock Get-ItemProperty { [pscustomobject]@{ ValidateAdminCodeSignatures = 1 } }
+        Get-ElevationPolicyNote | Should-MatchString 'ValidateAdminCodeSignatures is 1'
+    }
+
+    # A machine can carry more than one, and hearing about only the first would
+    # send someone to change a value that was not the whole story.
+    It 'names every restrictive value, not just the first' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ EnableLUA = 0; ConsentPromptBehaviorUser = 0; ValidateAdminCodeSignatures = 1 }
+        }
+        $note = Get-ElevationPolicyNote
+        @('EnableLUA is 0', 'ConsentPromptBehaviorUser is 0', 'ValidateAdminCodeSignatures is 1') |
+            Should-All { $note -match $_ }
+    }
+
+    # The permissive settings are the common case. Reporting them would make the
+    # note appear on every machine and mean nothing on any of them.
+    It 'stays quiet when the same values are set permissively' {
+        Mock Get-ItemProperty {
+            [pscustomobject]@{ EnableLUA = 1; ConsentPromptBehaviorUser = 3; ValidateAdminCodeSignatures = 0 }
+        }
+        Get-ElevationPolicyNote | Should-BeNull
+    }
+}
+
+Describe 'A failed elevation names the policy' -Tag 'Static','Security' {
+
+    It 'appends the policy note to the failure it throws' {
+        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Invoke-SelfElevation.ps1') -Raw |
+            Should-MatchString '\$policyNote = Get-ElevationPolicyNote'
+    }
+
+    It 'still points at -SkipElevation' {
+        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Invoke-SelfElevation.ps1') -Raw |
+            Should-MatchString 'Re-run with -SkipElevation'
+    }
+}
+
 Describe 'Test-PackagedProcess' -Tag 'Unit','Security' {
 
     It 'recognises the package binary under WindowsApps' {

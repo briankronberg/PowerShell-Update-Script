@@ -53,9 +53,23 @@ try {
     Import-Module UpdateEverything -Force
     $result.Imported = $true
 
-    # Bare, so the elevation handoff happens. The result object comes back from
-    # the parent; the child's own transcript is what the harness counts.
-    $run = Update-Everything -IncludeWindowsUpdate $false
+    # The elevation handoff happens, which is the point. -NonInteractive
+    # protects this process from a prompt it cannot answer, but not the elevated
+    # child: Invoke-SelfElevation builds its own command line, and that window
+    # gets a real console where Test-CanPrompt says yes.
+    #
+    # So the two questions a fresh machine actually asks are answered in
+    # advance. -AllowInstall is forwarded to the child along with everything
+    # else, and answering ahead of time is exactly what it is for -- it is what
+    # the module tells a scheduled task to do for the same reason.
+    #
+    #   NuGetProvider  Trust PSGallery asks for it; no machine has it new
+    #   PowerShellGet  1.0.0.1 is what Windows ships, so the upgrade is offered
+    #
+    # Windows Update is off because it is the one step that can run for hours,
+    # and it proves nothing here.
+    $run = Update-Everything -IncludeWindowsUpdate $false `
+        -AllowInstall 'NuGetProvider', 'PowerShellGet'
 
     $result.Ran          = $run.Ran
     $result.Elevated_Run = $run.Elevated
