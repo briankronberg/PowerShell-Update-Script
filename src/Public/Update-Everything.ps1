@@ -177,6 +177,27 @@
         task that quietly followed main would be making that decision on every
         run.
 
+    .PARAMETER Tag
+        Run only the steps carrying one of these tags. Everything else is
+        reported as skipped with that reason, so the summary still accounts for
+        every step.
+
+        A step carries one or more of: Windows, Microsoft, PowerShell,
+        PackageManager, Python, Node, DotNet, Rust, Git, Self.
+
+            Update-Everything -Tag Python
+
+    .PARAMETER ExcludeTag
+        Run everything except the steps carrying one of these tags. Takes the
+        same values as -Tag.
+
+            Update-Everything -ExcludeTag Python
+
+        Both may be given at once, and exclusion wins. That makes two scheduled
+        tasks able to divide the work between them: one that updates everything
+        but Python daily, and one that updates only Python monthly, for a
+        toolchain something else depends on being held steady.
+
     .PARAMETER LogRetentionDays
         Delete logs and settings.json backups in the log directory older than this
         many days. Default: 30. Set to 0 to keep everything.
@@ -228,6 +249,10 @@
         [switch] $Notify,
         [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self')]
+        [string[]] $Tag = @(),
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self')]
+        [string[]] $ExcludeTag = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30,
         [switch] $UpdateSelf
@@ -381,6 +406,19 @@
 
     $script:Results = [System.Collections.Generic.List[object]]::new()
 
+    # Read by Invoke-Step, which decides per step. Held at script scope for the
+    # same reason as $script:isAdmin: a step action runs inside Invoke-Step, not
+    # here.
+    $script:TagFilter        = $Tag
+    $script:ExcludeTagFilter = $ExcludeTag
+
+    if ($Tag -or $ExcludeTag) {
+        $selection = @()
+        if ($Tag)        { $selection += "only $($Tag -join ', ')" }
+        if ($ExcludeTag) { $selection += "excluding $($ExcludeTag -join ', ')" }
+        Write-Host "Step selection: $($selection -join ', '). Everything else is reported as skipped." -ForegroundColor Cyan
+    }
+
     # winget exit codes that mean "nothing to do" rather than "failed".
     #   0x8A15002B (-1978335189) APPINSTALLER_CLI_ERROR_UPDATE_NOT_APPLICABLE
     #   0x8A150014 (-1978335212) APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
@@ -392,7 +430,7 @@
     # 1b. The module itself
     # ---------------------------------------------------------------------------
     if ($UpdateSelf) {
-        Invoke-Step -Name 'UpdateEverything (self)' -Action {
+        Invoke-Step -Name 'UpdateEverything (self)' -Tag 'Self' -Action {
             # Reinstalls whether or not the version differs. The version does not
             # move with every commit and the module is distributed from a branch
             # rather than the gallery, so "already 1.0.0" is the normal state of
@@ -430,7 +468,7 @@
     # ---------------------------------------------------------------------------
     # 2. winget (apps from winget + Microsoft Store sources)
     # ---------------------------------------------------------------------------
-    Invoke-Step -Name 'winget self-update' -RequiresCommand 'winget' -Action {
+    Invoke-Step -Name 'winget self-update' -RequiresCommand 'winget' -Tag 'Windows', 'PackageManager' -Action {
         # Refresh the source indexes first. A stale index makes 'upgrade --all'
         # quietly miss packages rather than fail loudly, so this is not just hygiene.
         winget source update --disable-interactivity
@@ -449,7 +487,7 @@
         }
     }
 
-    Invoke-Step -Name 'winget (all sources)' -RequiresCommand 'winget' -Action {
+    Invoke-Step -Name 'winget (all sources)' -RequiresCommand 'winget' -Tag 'Windows', 'PackageManager' -Action {
         winget upgrade --all --include-unknown --silent `
             --accept-source-agreements --accept-package-agreements --disable-interactivity
         $code = $LASTEXITCODE
@@ -470,7 +508,7 @@
     # 2b. PowerShell 7 (install if missing, else upgrade to the latest release)
     # ---------------------------------------------------------------------------
     if ($IncludePowerShell7) {
-        Invoke-Step -Name 'PowerShell 7 (latest)' -RequiresCommand 'winget' -RequiresAdmin -Action {
+        Invoke-Step -Name 'PowerShell 7 (latest)' -RequiresCommand 'winget' -RequiresAdmin -Tag 'PowerShell', 'Windows' -Action {
             $id  = 'Microsoft.PowerShell'
             $exe = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
 
@@ -532,7 +570,7 @@
     # ---------------------------------------------------------------------------
     # 2c. Microsoft 365 Apps (click-to-run)
     # ---------------------------------------------------------------------------
-    Invoke-Step -Name 'Microsoft 365 Apps' -Action {
+    Invoke-Step -Name 'Microsoft 365 Apps' -Tag 'Microsoft' -Action {
         $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
         # Indexed rather than "| Select-Object -First 1": that stops the upstream
         # pipeline, and inside a step -- where every stream is merged with *>&1 --
@@ -567,7 +605,7 @@
     # prompt, not an error. Trust is stored per-user under LOCALAPPDATA, and UAC
     # elevation keeps the same user profile, so setting it once here sticks for
     # both the elevated and the non-elevated run.
-    Invoke-Step -Name 'Trust PSGallery' -Action {
+    Invoke-Step -Name 'Trust PSGallery' -Tag 'PowerShell' -Action {
         # PowerShellGet v2 pulls the NuGet provider on first use and prompts for it.
         if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
             if (-not (Approve-Install -Component 'NuGetProvider' -Approved $AllowInstall `
@@ -616,7 +654,7 @@
     # machine could carry a years-old NuGet provider or a PowerShellGet 2.1 for
     # as long as it lived. This runs before 'PowerShell modules' because that
     # step is one of the things that depends on it.
-    Invoke-Step -Name 'Gallery tooling' -Action {
+    Invoke-Step -Name 'Gallery tooling' -Tag 'PowerShell' -Action {
         # Not admin-gated, and -Scope AllUsers fails without elevation, so the
         # scope follows what the run actually has.
         $scope = if ($isAdmin) { 'AllUsers' } else { 'CurrentUser' }
@@ -733,7 +771,7 @@
         }
     }
 
-    Invoke-Step -Name 'PowerShell modules' -Action {
+    Invoke-Step -Name 'PowerShell modules' -Tag 'PowerShell' -Action {
         if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
             # -TrustRepository suppresses the prompt for this call even when the
             # Trust PSGallery step could not persist the setting.
@@ -769,7 +807,7 @@
         }
     }
 
-    Invoke-Step -Name 'PowerShell help' -Action {
+    Invoke-Step -Name 'PowerShell help' -Tag 'PowerShell' -Action {
         $helpParams = @{ Force = $true; ErrorAction = 'SilentlyContinue' }
 
         # -Scope only exists on PS 6+; AllUsers writes under $PSHOME and needs admin.
@@ -786,7 +824,7 @@
     # ---------------------------------------------------------------------------
     # 4. Python toolchain
     # ---------------------------------------------------------------------------
-    Invoke-Step -Name 'Python (Install Manager)' -Action {
+    Invoke-Step -Name 'Python (Install Manager)' -Tag 'Python' -Action {
         # Reported as skipped rather than OK. A step that did nothing because
         # the tool is absent is not the same as a step that updated something,
         # and the summary should not read as though Python were handled.
@@ -795,7 +833,7 @@
         else   { Stop-StepAsSkipped -Reason 'the Python Install Manager is not installed' }
     }
 
-    Invoke-Step -Name 'uv' -RequiresCommand 'uv' -Action {
+    Invoke-Step -Name 'uv' -RequiresCommand 'uv' -Tag 'Python' -Action {
         # Self-update only what nothing else is managing. Running "uv self
         # update" against a uv that scoop or winget installed fights whichever
         # one owns it, and that manager's own step will update it anyway.
@@ -821,14 +859,14 @@
         }
     }
 
-    Invoke-Step -Name 'pipx packages' -RequiresCommand 'pipx' -Action {
+    Invoke-Step -Name 'pipx packages' -RequiresCommand 'pipx' -Tag 'Python' -Action {
         pipx upgrade-all
     }
 
     # ---------------------------------------------------------------------------
     # 5. Node / npm
     # ---------------------------------------------------------------------------
-    Invoke-Step -Name 'npm' -RequiresCommand 'npm' -Action {
+    Invoke-Step -Name 'npm' -RequiresCommand 'npm' -Tag 'Node' -Action {
         # npm writes progress and deprecation notices to stderr as a matter of course,
         # so judge it by exit code only.
         # Output is captured as well as passed through, because the reason npm failed
@@ -867,7 +905,7 @@
     # ---------------------------------------------------------------------------
     # 6. .NET global tools
     # ---------------------------------------------------------------------------
-    Invoke-Step -Name '.NET global tools' -RequiresCommand 'dotnet' -Action {
+    Invoke-Step -Name '.NET global tools' -RequiresCommand 'dotnet' -Tag 'DotNet' -Action {
         # 'dotnet' exists for runtime-only installs too, and 'dotnet --version' fails
         # outright when there is no SDK or when a global.json pins a missing one.
         # Validate the string before casting it to an int.
@@ -919,7 +957,7 @@
         }
     }
 
-    Invoke-Step -Name '.NET workloads' -RequiresCommand 'dotnet' -Action {
+    Invoke-Step -Name '.NET workloads' -RequiresCommand 'dotnet' -Tag 'DotNet' -Action {
         # No-ops cleanly ("No workloads to update") when none are installed, but a
         # runtime-only install has no workload command at all.
         dotnet workload update
@@ -934,11 +972,11 @@
     # ---------------------------------------------------------------------------
     # 1641 and 3010 are the MSI "reboot initiated" / "reboot required" codes, which
     # Chocolatey passes straight through on an otherwise successful upgrade.
-    Invoke-Step -Name 'Chocolatey' -RequiresCommand 'choco' -AllowedExitCodes 1641, 3010 -Action {
+    Invoke-Step -Name 'Chocolatey' -RequiresCommand 'choco' -AllowedExitCodes 1641, 3010 -Tag 'PackageManager' -Action {
         choco upgrade all -y
     }
 
-    Invoke-Step -Name 'Scoop' -RequiresCommand 'scoop' -Action {
+    Invoke-Step -Name 'Scoop' -RequiresCommand 'scoop' -Tag 'PackageManager' -Action {
         # Run the three phases independently: a failure in one (a broken bucket, an
         # app that will not clean up) should not hide the others.
         $phases = @(
@@ -957,11 +995,11 @@
         }
     }
 
-    Invoke-Step -Name 'rustup' -RequiresCommand 'rustup' -Action {
+    Invoke-Step -Name 'rustup' -RequiresCommand 'rustup' -Tag 'Rust' -Action {
         rustup update
     }
 
-    Invoke-Step -Name 'GitHub CLI extensions' -RequiresCommand 'gh' -Action {
+    Invoke-Step -Name 'GitHub CLI extensions' -RequiresCommand 'gh' -Tag 'Git' -Action {
         # 'gh extension upgrade --all' exits non-zero when nothing is installed,
         # which would otherwise fail the step. Check before calling it.
         $installed = (gh extension list 2>&1 | Out-String).Trim()
@@ -976,7 +1014,7 @@
     # ---------------------------------------------------------------------------
     # 8. WSL kernel
     # ---------------------------------------------------------------------------
-    Invoke-Step -Name 'WSL kernel' -RequiresCommand 'wsl' -Action {
+    Invoke-Step -Name 'WSL kernel' -RequiresCommand 'wsl' -Tag 'Windows' -Action {
         # wsl.exe ships in System32 on every Windows 11 machine, so -RequiresCommand
         # proves nothing here. --status fails when the feature is not actually enabled.
         wsl --status
@@ -997,7 +1035,7 @@
     # ---------------------------------------------------------------------------
     # 9. Microsoft Defender signatures
     # ---------------------------------------------------------------------------
-    Invoke-Step -Name 'Defender signatures' -RequiresCommand 'Update-MpSignature' -RequiresAdmin -Action {
+    Invoke-Step -Name 'Defender signatures' -RequiresCommand 'Update-MpSignature' -RequiresAdmin -Tag 'Windows', 'Microsoft' -Action {
         # The Defender cmdlets are present even on machines where a third-party AV has
         # taken over and the antimalware service is off. Probe before updating so that
         # a managed device does not report a failed step every run.
@@ -1020,7 +1058,7 @@
     #     (placed before Windows Update so an AutoReboot can't skip it)
     # ---------------------------------------------------------------------------
     if ($SetPwshTerminalDefault) {
-        Invoke-Step -Name 'Windows Terminal default = PowerShell 7' -Action {
+        Invoke-Step -Name 'Windows Terminal default = PowerShell 7' -Tag 'PowerShell', 'Windows' -Action {
             Set-PwshAsWindowsTerminalDefault -LogDir $logDir
         }
     } else {
@@ -1031,7 +1069,7 @@
     # 10. Windows Update (OS + drivers) via PSWindowsUpdate
     # ---------------------------------------------------------------------------
     if ($IncludeWindowsUpdate) {
-        Invoke-Step -Name 'Windows Update' -RequiresAdmin -Action {
+        Invoke-Step -Name 'Windows Update' -RequiresAdmin -Tag 'Windows', 'Microsoft' -Action {
             if (-not $isAdmin) { throw 'Administrator rights required for Windows Update.' }
 
             if (-not (Get-Module -ListAvailable -Name PSWindowsUpdate)) {

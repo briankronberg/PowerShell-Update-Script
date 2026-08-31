@@ -170,9 +170,41 @@ thing that crosses a process boundary.
 | `-PromptTimeoutSeconds` | `60` | How long that prompt waits before starting anyway. |
 | `-DelayMinutes` | `60` | How long the "wait, then run" answer waits. |
 | `-Notify` | off | Show a toast when the run finishes, plus an urgent one if a restart is needed. Intended for scheduled runs. |
-| `-AllowInstall` | *(none)* | Which missing components may be installed: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`, `PowerShellGet`. |
+| `-AllowInstall` | *(none)* | Which missing components may be installed: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`, `PowerShellGet`, `PSResourceGet`. |
+| `-Tag` | *(all)* | Run only the steps carrying one of these tags. Everything else is reported as skipped. |
+| `-ExcludeTag` | *(none)* | Run everything except the steps carrying one of these tags. Exclusion wins when both are given. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
 | `-UpdateSelf` | off | Reinstall this module from GitHub first, whether or not the version differs. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. Off by default because it fetches and runs an installer from a branch. |
+
+## Selecting steps
+
+`-Tag` and `-ExcludeTag` narrow a run to part of the work. A step carries one or
+more of:
+
+`Windows` `Microsoft` `PowerShell` `PackageManager` `Python` `Node` `DotNet`
+`Rust` `Git` `Self`
+
+```powershell
+Update-Everything -Tag Python
+Update-Everything -ExcludeTag Python
+```
+
+Both may be given at once and exclusion wins, so `-Tag Python -ExcludeTag Node`
+is not a contradiction and `-Tag Python -ExcludeTag Python` selects nothing
+rather than erroring.
+
+A step ruled out this way is reported as `Skipped` with the reason rather than
+dropped, so the summary still accounts for every step and the count does not
+quietly change between runs.
+
+The point is two scheduled tasks dividing the work. Something pinned to a
+version another application depends on wants updating on its own schedule, not
+on the one that keeps everything else current:
+
+```powershell
+Register-UpdateEverythingTask -ExcludeTag Python -Cadence Daily
+Register-UpdateEverythingTask -Tag Python -Cadence Monthly
+```
 
 ## What it updates
 

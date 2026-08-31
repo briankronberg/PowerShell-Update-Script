@@ -26,6 +26,8 @@ BeforeDiscovery {
         @{ Name = 'SkipElevation';             TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'Notify';                    TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'AllowInstall';              TypeName = 'string[]'; Type = [string[]]; Default = '@()' }
+        @{ Name = 'Tag';                       TypeName = 'string[]'; Type = [string[]]; Default = '@()' }
+        @{ Name = 'ExcludeTag';                TypeName = 'string[]'; Type = [string[]]; Default = '@()' }
         @{ Name = 'PromptBeforeRun';           TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'PromptTimeoutSeconds';      TypeName = 'int';      Type = [int];      Default = '60' }
         @{ Name = 'DelayMinutes';              TypeName = 'int';      Type = [int];      Default = '60' }
@@ -454,7 +456,7 @@ Describe 'Update-Everything' -Tag 'Static' {
 
         It 'declares no parameters beyond the documented contract' {
             $script:DeclaredParameters.Name.VariablePath.UserPath |
-                Should-BeCollection -Count 14 -Because 'a new parameter needs docs and a test'
+                Should-BeCollection -Count 16 -Because 'a new parameter needs docs and a test'
         }
 
         It 'bounds -LogRetentionDays with ValidateRange' {
@@ -782,7 +784,7 @@ Describe 'Variable hygiene' -Tag 'Static' {
             'ShellId', 'NestedPromptLevel', 'StackTrace', 'switch', 'foreach',
             # Set by the module loader, and by the caller of a private helper.
             'ModuleRoot', 'Results', 'logDir', 'runStamp', 'isAdmin', 'InstallDecision',
-            'NotificationsAvailable', 'WingetNothingToDo'
+            'NotificationsAvailable', 'WingetNothingToDo', 'TagFilter', 'ExcludeTagFilter'
         )
 
         $bare = { param($p) ($p -replace '^(script|global|local|private):', '') }
