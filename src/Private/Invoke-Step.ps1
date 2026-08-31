@@ -60,6 +60,19 @@
     Write-StepLog -Path $stepLog -Message "STARTING $Name"
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
+    # Function-local, so the caller's session is untouched -- which is the point
+    # of the rule against setting this in a module, and is not what this does.
+    #
+    # A caller that prefers Stop makes a native command's stderr terminating, and
+    # most of these steps drive tools that write to stderr as a matter of course:
+    # npm its deprecation notices, winget its progress, wsl its "not installed"
+    # message. Every one of those steps then throws before reaching the exit-code
+    # check written to handle exactly that case, so the run's result depends on a
+    # preference set outside it.
+    #
+    # Non-terminating errors still reach $stepOutput and are still counted below.
+    $ErrorActionPreference = 'Continue'
+
     try {
         # Reset so a cmdlet-only step can't inherit a stale exit code from an earlier native command
         $global:LASTEXITCODE = 0
