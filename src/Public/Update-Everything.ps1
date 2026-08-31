@@ -549,7 +549,42 @@
     }
 
     # ---------------------------------------------------------------------------
-    # 2b. PowerShell 7 (install if missing, else upgrade to the latest release)
+    # A manager runs before the tools it may own. Chocolatey and Scoop install
+    # language toolchains, so updating uv or npm first and the manager that owns
+    # it second updates a tool and then the thing responsible for it. The
+    # toolchain steps ask Get-ToolInstallSource before self-updating, so this is
+    # sequence rather than a live conflict -- but the sequence should read the
+    # way the dependency runs.
+    # ---------------------------------------------------------------------------
+    # 2b. Chocolatey and Scoop, before the toolchains they may own
+    # ---------------------------------------------------------------------------
+    # 1641 and 3010 are the MSI "reboot initiated" / "reboot required" codes, which
+    # Chocolatey passes straight through on an otherwise successful upgrade.
+    Invoke-Step -Name 'Chocolatey' -RequiresCommand 'choco' -AllowedExitCodes 1641, 3010 -Tag 'PackageManager' -Action {
+        choco upgrade all -y
+    }
+
+    Invoke-Step -Name 'Scoop' -RequiresCommand 'scoop' -Tag 'PackageManager' -Action {
+        # Run the three phases independently: a failure in one (a broken bucket, an
+        # app that will not clean up) should not hide the others.
+        $phases = @(
+            @{ Label = 'scoop update (scoop itself + buckets)'; Args = @('update') },
+            @{ Label = 'scoop update * (installed apps)';       Args = @('update', '*') },
+            @{ Label = 'scoop cleanup * (old versions)';        Args = @('cleanup', '*') }
+        )
+        foreach ($phase in $phases) {
+            Write-Output "-> $($phase.Label)"
+            $phaseArgs = $phase.Args
+            & scoop @phaseArgs
+            if ($LASTEXITCODE -ne 0) {
+                Write-Warning "$($phase.Label) returned $LASTEXITCODE; continuing with the next phase."
+                $global:LASTEXITCODE = 0
+            }
+        }
+    }
+
+    # ---------------------------------------------------------------------------
+    # 2c. PowerShell 7 (install if missing, else upgrade to the latest release)
     # ---------------------------------------------------------------------------
     if ($IncludePowerShell7) {
         Invoke-Step -Name 'PowerShell 7 (latest)' -RequiresCommand 'winget' -RequiresAdmin -Tag 'PowerShell', 'Windows' -Action {
@@ -612,7 +647,7 @@
     }
 
     # ---------------------------------------------------------------------------
-    # 2c. Microsoft 365 Apps (click-to-run)
+    # 2d. Microsoft 365 Apps (click-to-run)
     # ---------------------------------------------------------------------------
     Invoke-Step -Name 'Microsoft 365 Apps' -Tag 'Microsoft' -Action {
         $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
@@ -1012,33 +1047,8 @@
     }
 
     # ---------------------------------------------------------------------------
-    # 7. Other package managers (run only if installed)
+    # 7. Self-updating tools
     # ---------------------------------------------------------------------------
-    # 1641 and 3010 are the MSI "reboot initiated" / "reboot required" codes, which
-    # Chocolatey passes straight through on an otherwise successful upgrade.
-    Invoke-Step -Name 'Chocolatey' -RequiresCommand 'choco' -AllowedExitCodes 1641, 3010 -Tag 'PackageManager' -Action {
-        choco upgrade all -y
-    }
-
-    Invoke-Step -Name 'Scoop' -RequiresCommand 'scoop' -Tag 'PackageManager' -Action {
-        # Run the three phases independently: a failure in one (a broken bucket, an
-        # app that will not clean up) should not hide the others.
-        $phases = @(
-            @{ Label = 'scoop update (scoop itself + buckets)'; Args = @('update') },
-            @{ Label = 'scoop update * (installed apps)';       Args = @('update', '*') },
-            @{ Label = 'scoop cleanup * (old versions)';        Args = @('cleanup', '*') }
-        )
-        foreach ($phase in $phases) {
-            Write-Output "-> $($phase.Label)"
-            $phaseArgs = $phase.Args
-            & scoop @phaseArgs
-            if ($LASTEXITCODE -ne 0) {
-                Write-Warning "$($phase.Label) returned $LASTEXITCODE; continuing with the next phase."
-                $global:LASTEXITCODE = 0
-            }
-        }
-    }
-
     Invoke-Step -Name 'rustup' -RequiresCommand 'rustup' -Tag 'Rust' -Action {
         rustup update
     }
