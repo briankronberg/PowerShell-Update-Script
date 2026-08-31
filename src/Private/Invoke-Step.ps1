@@ -18,10 +18,14 @@
     # Tag filter first: a step the caller excluded should not even be checked for
     # administrator rights or for its tool, because neither is why it is skipped.
     if (-not (Test-StepTagMatch -StepTag $Tag -Tag $script:TagFilter -ExcludeTag $script:ExcludeTagFilter)) {
-        $reason = if (@($script:TagFilter).Count) {
-            "does not match -Tag $($script:TagFilter -join ',')"
+        # Which filter actually refused it. Exclusion wins when both are given,
+        # so asking "was -Tag set" first would blame -Tag for an exclusion and
+        # send someone looking at the wrong parameter.
+        $refused = @($Tag | Where-Object { $_ -and $_ -in @($script:ExcludeTagFilter | Where-Object { $_ }) })
+        $reason = if ($refused.Count) {
+            "excluded by -ExcludeTag $($refused -join ',')"
         } else {
-            "excluded by -ExcludeTag $($script:ExcludeTagFilter -join ',')"
+            "does not match -Tag $(@($script:TagFilter | Where-Object { $_ }) -join ',')"
         }
         Add-SkippedStep -Name $Name -Reason $reason
         return

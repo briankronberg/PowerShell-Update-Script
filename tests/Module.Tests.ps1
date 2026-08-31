@@ -20,6 +20,7 @@ BeforeDiscovery {
         @{ Name = 'IncludeWindowsUpdate';      TypeName = 'bool';     Type = [bool];     Default = '$true' }
         @{ Name = 'IncludePowerShell7';        TypeName = 'bool';     Type = [bool];     Default = '$true' }
         @{ Name = 'SetPwshTerminalDefault';    TypeName = 'bool';     Type = [bool];     Default = '$true' }
+        @{ Name = 'IncludePowerShellModules'; TypeName = 'bool';     Type = [bool];     Default = '$true' }
         @{ Name = 'AutoReboot';                TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'IncludePrerelease';         TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'UpdateGlobalNpm';           TypeName = 'switch';   Type = [switch];   Default = $null }
@@ -33,6 +34,7 @@ BeforeDiscovery {
         @{ Name = 'DelayMinutes';              TypeName = 'int';      Type = [int];      Default = '60' }
         @{ Name = 'LogRetentionDays';          TypeName = 'int';      Type = [int];      Default = '30' }
         @{ Name = 'UpdateSelf';                TypeName = 'switch';   Type = [switch];   Default = $null }
+        @{ Name = 'UpdateSelfSource';          TypeName = 'string';   Type = [string];   Default = "'Gallery'" }
     )
 
     # Each of these either reboots the machine, moves pinned toolchains, or
@@ -456,7 +458,7 @@ Describe 'Update-Everything' -Tag 'Static' {
 
         It 'declares no parameters beyond the documented contract' {
             $script:DeclaredParameters.Name.VariablePath.UserPath |
-                Should-BeCollection -Count 16 -Because 'a new parameter needs docs and a test'
+                Should-BeCollection -Count 18 -Because 'a new parameter needs docs and a test'
         }
 
         It 'bounds -LogRetentionDays with ValidateRange' {

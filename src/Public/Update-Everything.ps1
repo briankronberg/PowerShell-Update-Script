@@ -72,6 +72,16 @@
         Point Windows Terminal's default profile at PowerShell 7. Default: $true.
         Per-user change; silently skipped if Windows Terminal is not installed.
 
+    .PARAMETER IncludePowerShellModules
+        Update every installed PowerShell module. Default: $true.
+
+        Set it to $false for a run that should leave modules alone, which is
+        usually because one is pinned to a version something else depends on.
+        The step is reported as skipped rather than dropped.
+
+        -ExcludeTag PowerShell is the broader hammer: it also skips the gallery
+        trust, the gallery tooling, help, PowerShell 7 and the Terminal default.
+
     .PARAMETER AutoReboot
         Allow Windows Update to reboot automatically if required. Default: $false
 
@@ -153,29 +163,18 @@
         warning has scrolled well out of sight.
 
     .PARAMETER UpdateSelf
-        Reinstall this module from the main branch on GitHub before doing
-        anything else, whether or not the installed version differs.
-        Default: $false.
+        Update this module before doing anything else. Default: $false.
+        -UpdateSelfSource decides where from, and defaults to the gallery.
 
-        This tracks the development head, not the latest release. To move
-        between published versions, use the gallery instead:
+        It takes effect on the *next* run either way. Unlike winget, which is a
+        fresh process every step, this module is already loaded by the time the
+        step runs: the files on disk are replaced, and the functions executing
+        now stay on the code already in memory.
 
-            Update-Module UpdateEverything
-
-        The module version does not move with every commit, so "already 1.0.0"
-        is the normal state of an out-of-date working copy and a version check
-        cannot decide whether a reinstall is needed. Hence the unconditional
-        reinstall.
-
-        It takes effect on the *next* run. Unlike winget, which is a fresh
-        process every step, this module is already loaded by the time the step
-        runs: the files on disk are replaced, and the functions executing now
-        stay on the code already in memory.
-
-        Off by default. It fetches and runs an installer from a branch, which is
-        a supply-chain decision rather than a routine update, and a scheduled
-        task that quietly followed main would be making that decision on every
-        run.
+        Off by default. From Main it fetches and runs an installer from a
+        branch, which is a supply-chain decision rather than a routine update,
+        and a scheduled task that quietly followed main would be making that
+        decision on every run.
 
     .PARAMETER Tag
         Run only the steps carrying one of these tags. Everything else is
@@ -198,6 +197,20 @@
         tasks able to divide the work between them: one that updates everything
         but Python daily, and one that updates only Python monthly, for a
         toolchain something else depends on being held steady.
+
+    .PARAMETER UpdateSelfSource
+        Where -UpdateSelf gets this module from. Default: Gallery.
+
+          Gallery  the newest published release, through Update-Module
+          Main     the development head, by fetching Install.ps1 from GitHub
+
+        Gallery is the default because a published release is what most people
+        want. Main is for tracking a fix that has landed but not shipped, and
+        for testing.
+
+        Gallery cannot move a copy that PowerShellGet did not install -- one put
+        there by the GitHub installer, for instance. The run says so and names
+        the way forward rather than failing.
 
     .PARAMETER LogRetentionDays
         Delete logs and settings.json backups in the log directory older than this
@@ -238,6 +251,7 @@
         [bool]   $IncludeWindowsUpdate   = $true,
         [bool]   $IncludePowerShell7     = $true,
         [bool]   $SetPwshTerminalDefault = $true,
+        [bool]   $IncludePowerShellModules = $true,
         [switch] $AutoReboot,
         [switch] $IncludePrerelease,
         [switch] $UpdateGlobalNpm,
@@ -256,7 +270,9 @@
         [string[]] $ExcludeTag = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30,
-        [switch] $UpdateSelf
+        [switch] $UpdateSelf,
+        [ValidateSet('Gallery', 'Main')]
+        [string] $UpdateSelfSource = 'Gallery'
     )
 
     # State shared with the private helpers is assigned with $script:. Inside a
@@ -475,10 +491,31 @@
     # ---------------------------------------------------------------------------
     if ($UpdateSelf) {
         Invoke-Step -Name 'UpdateEverything (self)' -Tag 'Self' -Action {
-            # Reinstalls whether or not the version differs. The version does not
-            # move with every commit and the module is distributed from a branch
-            # rather than the gallery, so "already 1.0.0" is the normal state of
-            # an out-of-date copy and is no reason to skip.
+            if ($UpdateSelfSource -eq 'Gallery') {
+                $status = Get-GalleryModuleStatus -Name 'UpdateEverything'
+
+                if (-not $status.Available) {
+                    Write-Output "UpdateEverything $($status.Installed) is installed; the gallery could not be asked about it."
+                } elseif (-not $status.Updatable) {
+                    # A copy the GitHub installer put there was not installed by
+                    # PowerShellGet, so Update-Module refuses it. That is not a
+                    # fault, and -UpdateSelfSource Main is the matching path.
+                    Write-Output "UpdateEverything $($status.Installed) was not installed from the gallery, so Update-Module cannot move it. The published version is $($status.Available)."
+                    Write-Output 'Use -UpdateSelfSource Main to track the branch it came from, or Install-Module UpdateEverything -Force to switch to the gallery copy.'
+                } elseif (-not $status.NeedsUpdate) {
+                    Write-Output "UpdateEverything $($status.Installed) is the newest published release."
+                } else {
+                    Write-Output "UpdateEverything $($status.Installed) -> $($status.Available)..."
+                    Update-Module -Name 'UpdateEverything' -Force -Confirm:$false -ErrorAction Stop
+                    Write-Output 'Updated. The new version loads on the next run; this one continues on the code already in memory.'
+                }
+                return
+            }
+
+            # Main. Reinstalls whether or not the version differs, because the
+            # module version does not move with every commit: "already 1.0.0" is
+            # the normal state of an out-of-date working copy, so a version
+            # check cannot decide whether a reinstall is needed.
             $uri = 'https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1'
             $installer = Join-Path ([System.IO.Path]::GetTempPath()) "Install-UpdateEverything-$script:runStamp.ps1"
 
@@ -850,7 +887,15 @@
         }
     }
 
+    if (-not $IncludePowerShellModules) {
+        Add-SkippedStep -Name 'PowerShell modules'
+    } else {
     Invoke-Step -Name 'PowerShell modules' -Tag 'PowerShell' -Action {
+        # Both update commands are silent on success, so the step reported OK and
+        # a duration and nothing else. Taken either side of the pass, this says
+        # what actually moved.
+        $before = Get-ModuleVersionMap
+
         if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
             # -TrustRepository suppresses the prompt for this call even when the
             # Trust PSGallery step could not persist the setting.
@@ -883,7 +928,28 @@
             Update-Module @p
         } else {
             Write-Output 'No PowerShellGet/PSResourceGet available; skipping.'
+            return
         }
+
+        $after = Get-ModuleVersionMap
+
+        $moved = foreach ($name in ($after.Keys | Sort-Object)) {
+            if (-not $before.ContainsKey($name)) {
+                "  {0} {1} (new)" -f $name, $after[$name]
+            } elseif ($after[$name] -gt $before[$name]) {
+                "  {0} {1} -> {2}" -f $name, $before[$name], $after[$name]
+            }
+        }
+
+        $moved = @($moved)
+        if ($moved.Count) {
+            Write-Output ''
+            Write-Output "$($moved.Count) module(s) updated:"
+            $moved | ForEach-Object { Write-Output $_ }
+        } else {
+            Write-Output "No modules needed updating. $($after.Count) installed."
+        }
+    }
     }
 
     Invoke-Step -Name 'PowerShell help' -Tag 'PowerShell' -Action {
