@@ -6,7 +6,7 @@ function New-TaskFromPrompt {
         .DESCRIPTION
         The steps are the point. A second task exists because it runs with
         different parameters: "everything but Python, daily" alongside "only
-        Python, weekly", for a toolchain something else depends on being held
+        Python, monthly", for a toolchain something else depends on being held
         steady. That is why this asks for tags rather than only a schedule.
 
         Blank answers take the defaults, so a person who only wants a second
@@ -49,13 +49,11 @@ function New-TaskFromPrompt {
     $name = (Read-Host "Task name [$DefaultName]").Trim()
     if (-not $name) { $name = $DefaultName }
 
-    # PatchTuesday is deliberately not offered. It is a documented cadence and it
-    # cannot register: the monthly trigger is built as a client-only CIM instance
-    # that Register-ScheduledTask refuses. See issue #36. Offering a choice that
-    # fails would be worse than offering fewer.
-    $cadences = @('Daily', 'Weekly')
+    # PatchTuesday is the monthly one: the third Wednesday, a week after
+    # Microsoft ships, so the patches have settled.
+    $cadences = @('Daily', 'Weekly', 'PatchTuesday')
 
-    $cadence = (Read-Host 'Cadence: Daily or Weekly [Weekly]').Trim()
+    $cadence = (Read-Host 'Cadence: Daily, Weekly, or PatchTuesday for monthly [Weekly]').Trim()
     if (-not $cadence) { $cadence = 'Weekly' }
     if ($cadence -notin $cadences) {
         Write-Warning "'$cadence' is not one of: $($cadences -join ', '). Nothing was registered."

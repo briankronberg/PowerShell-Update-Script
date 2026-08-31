@@ -131,27 +131,20 @@ Describe 'New-UpdateTaskTrigger' -Tag 'Unit' {
 
     Context 'PatchTuesday' {
 
-        # New-ScheduledTaskTrigger has no monthly parameter set, so this one is
-        # built from the CIM class by hand and is the most likely to break.
-        It 'builds a monthly day-of-week trigger' {
+        # This used to assert a hand-built MSFT_TaskMonthlyDOWTrigger, and every
+        # assertion passed while the cadence could not register a task at all:
+        # Register-ScheduledTask refuses a client-only instance of that class.
+        # The monthly shape is now asserted where it is actually applied, by the
+        # Integration tests at the end of this file.
+        It 'returns a trigger Register-ScheduledTask will accept' {
             $trigger = New-UpdateTaskTrigger -Cadence PatchTuesday -DayOfWeek Wednesday -At '12:00'
-            $trigger.CimClass.CimClassName | Should-Be 'MSFT_TaskMonthlyDOWTrigger'
+            $trigger.PSObject.TypeNames |
+                Should-ContainCollection 'Microsoft.Management.Infrastructure.CimInstance#MSFT_TaskTrigger'
         }
 
         It 'targets Wednesday' {
             $trigger = New-UpdateTaskTrigger -Cadence PatchTuesday -DayOfWeek Wednesday -At '12:00'
             $trigger.DaysOfWeek | Should-Be 8
-        }
-
-        It 'targets the third week' {
-            $trigger = New-UpdateTaskTrigger -Cadence PatchTuesday -DayOfWeek Wednesday -At '12:00'
-            # first=1, second=2, third=4, fourth=8
-            $trigger.WeeksOfMonth | Should-Be 4
-        }
-
-        It 'runs in every month of the year' {
-            $trigger = New-UpdateTaskTrigger -Cadence PatchTuesday -DayOfWeek Wednesday -At '12:00'
-            $trigger.MonthsOfYear | Should-Be 4095
         }
 
         It 'starts on a Wednesday' {
@@ -608,11 +601,11 @@ Describe 'Adding a second task' -Tag 'Unit' {
         Should-Invoke Register-UpdateEverythingTask -ParameterFilter { $ExcludeTag -contains 'Python' }
     }
 
-    # PatchTuesday is a real cadence of Register-UpdateEverythingTask and is not
-    # offered here, because it cannot register at all -- see issue #36. Catching
-    # it here turns a binding failure into a sentence.
+    # Monthly is the obvious guess and is not one of the names: the monthly
+    # cadence here is PatchTuesday. Catching it turns a binding failure into a
+    # sentence.
     It 'refuses a cadence it does not offer' {
-        $script:answers = @('x', 'PatchTuesday', '', '')
+        $script:answers = @('x', 'Monthly', '', '')
         $script:next = 0
         Mock Read-Host { $script:answers[$script:next++] }
 
@@ -641,5 +634,65 @@ Describe 'Adding a second task' -Tag 'Unit' {
         New-TaskFromPrompt -DefaultName 'Update-Everything' -Replace
 
         Should-Invoke Register-UpdateEverythingTask -ParameterFilter { $Force }
+    }
+}
+
+Describe 'Every cadence can actually register a task' -Tag 'Integration' {
+
+    # This registers real scheduled tasks and removes them again, which
+    # CONTRIBUTING otherwise rules out. The exception is documented there, and
+    # this is the case that earned it: PatchTuesday shipped in 1.0.0 unable to
+    # register at all, and every unit test passed the whole time.
+    #
+    # New-UpdateTaskTrigger's output was asserted and was correct. Nothing
+    # handed it to Register-ScheduledTask, which is the only place it was
+    # refused -- the bug lived in the join between two things that were each
+    # fine, and only a real registration crosses that join.
+
+    # BeforeDiscovery, not BeforeAll: -Skip: is evaluated while Pester is
+    # discovering tests, which is before any BeforeAll has run. Setting it there
+    # leaves $script:CanRegister null and skips the tests on a machine that could
+    # have run them.
+    BeforeDiscovery {
+        $script:CanRegister = ([Security.Principal.WindowsPrincipal] `
+            [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
+                [Security.Principal.WindowsBuiltInRole]::Administrator)
+    }
+
+    BeforeAll {
+        $script:TestTaskName = 'UpdateEverything-PesterCadence'
+    }
+
+    AfterEach {
+        Unregister-ScheduledTask -TaskName $script:TestTaskName -Confirm:$false -ErrorAction SilentlyContinue
+    }
+
+    It 'registers a <_> task' -ForEach @('Daily', 'Weekly', 'PatchTuesday') -Skip:(-not $script:CanRegister) {
+        $cadence = $_
+
+        # Not wrapped in an assertion about throwing: if it throws, the test
+        # fails with the actual message, which is more use than "expected not to
+        # throw". This is how the cadence bug would have announced itself.
+        Register-UpdateEverythingTask -TaskName $script:TestTaskName -Cadence $cadence `
+            -Notify $false -Confirm:$false -ErrorAction Stop 6>$null | Out-Null
+
+        Get-ScheduledTask -TaskName $script:TestTaskName -ErrorAction SilentlyContinue |
+            Should-NotBeNull
+    }
+
+    # Week 3, Wednesday, all twelve months. Registering is not enough on its own:
+    # the weekly trigger it starts from would also register cleanly, and would
+    # then run every week instead of every month.
+    It 'gives PatchTuesday a monthly day-of-week trigger, not the weekly one it started as' -Skip:(-not $script:CanRegister) {
+        Register-UpdateEverythingTask -TaskName $script:TestTaskName -Cadence PatchTuesday `
+            -Notify $false -Confirm:$false -ErrorAction Stop 6>$null | Out-Null
+
+        $xml = [xml](Export-ScheduledTask -TaskName $script:TestTaskName)
+        $schedule = $xml.Task.Triggers.CalendarTrigger.ScheduleByMonthDayOfWeek
+
+        $schedule | Should-NotBeNull
+        $schedule.Weeks.Week | Should-Be '3'
+        @($schedule.DaysOfWeek.ChildNodes).Name | Should-Be 'Wednesday'
+        @($schedule.Months.ChildNodes) | Should-BeCollection -Count 12
     }
 }

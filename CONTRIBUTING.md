@@ -441,6 +441,12 @@ longer exists. Assert both ways.
   The suite fails until both exist.
 - New behaviour tested through the AST or a mock, not by running it. If testing
   it requires elevating, installing, or rebooting, it is being tested wrong.
+  The one exception is tagged `Integration`, and it exists because a mock cannot
+  catch a defect that lives *between* two things: `-Cadence PatchTuesday` shipped
+  in 1.0.0 unable to register a task at all, while the unit test asserting the
+  trigger object's properties passed, because nothing handed that object to
+  `Register-ScheduledTask`. Reach for this only when the failure is provably
+  invisible from either side, and leave the test able to skip when it cannot run.
 - No new `exit` in `src`, no `$ErrorActionPreference` in `src`, no empty
   `catch`.
 - Comments state facts about the code, not its history. The story of the change

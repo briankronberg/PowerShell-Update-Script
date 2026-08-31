@@ -39,28 +39,23 @@
             return New-ScheduledTaskTrigger -Weekly -DaysOfWeek $DayOfWeek -At $At @extra
         }
         'PatchTuesday' {
-            # Third Wednesday of every month. Bitmasks, not names:
-            #   DaysOfWeek   Sunday=1, Monday=2, Tuesday=4, Wednesday=8, ...
-            #   WeeksOfMonth first=1, second=2, third=4, fourth=8
-            #   MonthsOfYear 4095 = all twelve
+            # A weekly trigger on the right weekday and time, which
+            # Register-UpdateEverythingTask converts to "the third Wednesday of
+            # every month" through Set-MonthlyDayOfWeekTrigger once the task
+            # exists.
+            #
+            # It is not built here because it cannot be. Register-ScheduledTask
+            # takes a CimInstance#MSFT_TaskTrigger, and a client-only
+            # MSFT_TaskMonthlyDOWTrigger is not one: it lacks the type name, and
+            # adding the name by hand passes binding only to fail a layer deeper
+            # with "Type mismatch". Rewriting the registered task's XML is the
+            # way through, and that needs a registered task.
             $start = Get-NthDayOfWeek -Year $At.Year -Month $At.Month `
                 -DayOfWeek ([System.DayOfWeek]::Wednesday) -Occurrence 3
             $start = $start.Date.Add($At.TimeOfDay)
 
-            $property = @{
-                DaysOfWeek    = 8
-                WeeksOfMonth  = 4
-                MonthsOfYear  = 4095
-                StartBoundary = $start.ToString('s')
-                Enabled       = $true
-            }
-            if ($RandomDelayMinutes -gt 0) {
-                # The CIM class wants an ISO 8601 duration.
-                $property['RandomDelay'] = 'PT{0}M' -f $RandomDelayMinutes
-            }
-
-            return New-CimInstance -ClassName MSFT_TaskMonthlyDOWTrigger `
-                -Namespace 'Root/Microsoft/Windows/TaskScheduler' -ClientOnly -Property $property
+            return New-ScheduledTaskTrigger -Weekly `
+                -DaysOfWeek ([System.DayOfWeek]::Wednesday) -At $start @extra
         }
     }
 }
