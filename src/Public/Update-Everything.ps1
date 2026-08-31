@@ -183,9 +183,10 @@
         every step.
 
         A step carries one or more of: Windows, Microsoft, PowerShell,
-        PackageManager, Python, Node, DotNet, Rust, Git, Self.
+        PackageManager, Python, Node, DotNet, Rust, Git, Self, Inventory.
 
             Update-Everything -Tag Python
+            Update-Everything -Tag Inventory    report what is installed, update nothing
 
     .PARAMETER ExcludeTag
         Run everything except the steps carrying one of these tags. Takes the
@@ -249,9 +250,9 @@
         [switch] $Notify,
         [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')]
         [string[]] $Tag = @(),
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')]
         [string[]] $ExcludeTag = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30,
@@ -425,6 +426,49 @@
     $WingetNothingToDo = @(-1978335189, -1978335212)
 
     Write-Host "Maintenance run started $(Get-Date)  |  Admin: $isAdmin  |  Main Log: $mainLog" -ForegroundColor Green
+
+    # ---------------------------------------------------------------------------
+    # 1a. What this machine actually has
+    # ---------------------------------------------------------------------------
+    Invoke-Step -Name 'Inventory' -Tag 'Inventory' -Action {
+        $inventory = @(Get-UpdateToolInventory)
+        $present = @($inventory | Where-Object Present)
+        $absent = @($inventory | Where-Object { -not $_.Present })
+
+        Write-Output "$($present.Count) of $($inventory.Count) tools present."
+        Write-Output ''
+
+        # Aligned by hand rather than with Format-Table. Inside a step action the
+        # output has to reach the pipeline so Invoke-Step can capture it for the
+        # step log, and Format-Table's records would only render correctly on
+        # their way to a host -- which is the one place a step must not write.
+        $nameWidth = 0
+        $ownerWidth = 0
+        foreach ($tool in $present) {
+            if ($tool.Name.Length -gt $nameWidth) { $nameWidth = $tool.Name.Length }
+            if ("$($tool.Owner)".Length -gt $ownerWidth) { $ownerWidth = "$($tool.Owner)".Length }
+        }
+        foreach ($tool in $present) {
+            Write-Output ("  {0,-$nameWidth}  {1,-$ownerWidth}  {2}" -f $tool.Name, $tool.Owner, $tool.Version)
+        }
+
+        if ($absent.Count) {
+            Write-Output ''
+            Write-Output "Not installed: $(($absent.Name | Sort-Object) -join ', ')"
+            Write-Output 'Their steps report Skipped, which is the expected result rather than a fault.'
+        }
+
+        # More than one executable of a name on PATH means the version above is
+        # the one that runs and the others are updated by nobody. It is also how
+        # a tool ends up updated by a manager that does not own the copy in use.
+        $duplicated = @($present | Where-Object { $_.Copies -gt 1 })
+        if ($duplicated.Count) {
+            Write-Output ''
+            foreach ($tool in $duplicated) {
+                Write-Warning "$($tool.Name) is installed in $($tool.Copies) places; the first is the one that runs: $($tool.Places -join '; ')"
+            }
+        }
+    }
 
     # ---------------------------------------------------------------------------
     # 1b. The module itself
