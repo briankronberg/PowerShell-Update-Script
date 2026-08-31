@@ -179,8 +179,40 @@ $null = New-Item -ItemType Directory -Path $OutputPath -Force
 # The sandbox configuration. Written per run, because the mapped paths depend
 # on where the repository was cloned.
 # --------------------------------------------------------------------------
-$logon = '"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass ' +
-    '-File "C:\smoke\Start-Harness.ps1" -RepoPath "C:\repo" -OutputPath "C:\out"'
+# The logon command waits for its own script to appear before running it.
+#
+# Windows Sandbox starts the logon command without guaranteeing the mapped
+# folders are mounted, and -File against a path that is not there yet fails
+# instantly and silently: the sandbox sits at an empty desktop, nothing is
+# written, and the only evidence is a run that times out having produced
+# nothing at all. It is a race, so it looks intermittent -- the first run of
+# this harness worked, and two later ones did not.
+#
+# It also drops a breadcrumb the moment the folders appear, so a future failure
+# can be told apart from this one: no breadcrumb means the mapping never
+# arrived, a breadcrumb with no transcript means the harness itself died.
+# No ampersand anywhere in here, and that is not a style choice.
+#
+# Windows Sandbox mishandles "&" in a logon command even when it is correct XML.
+# SecurityElement::Escape turns it into "&amp;", which round-trips through
+# .NET's XML reader perfectly and still does not survive whatever the sandbox
+# does with it: the command never runs, the desktop sits empty, and nothing is
+# written anywhere. Measured -- the identical command with the call operator
+# removed runs, and with it restored does not.
+#
+# So the script is called by path rather than with "&". None of these paths
+# contains a space, so it needs no quoting either.
+#
+# The wait is for the mapped folders. The sandbox starts the logon command
+# without guaranteeing they are mounted, and a run that begins too early fails
+# silently. logon.txt is dropped the moment they appear, so a later failure can
+# be told apart from this one: no logon.txt means the mapping never arrived, a
+# logon.txt with no transcript means the harness itself died.
+$logon = '"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command ' +
+    '"$d = (Get-Date).AddMinutes(5); ' +
+    'while (-not (Test-Path C:\smoke\Start-Harness.ps1) -and (Get-Date) -lt $d) { Start-Sleep -Seconds 2 }; ' +
+    '''reached the mapped folders at '' + (Get-Date -Format o) | Set-Content C:\out\logon.txt; ' +
+    'C:\smoke\Start-Harness.ps1 -RepoPath C:\repo -OutputPath C:\out"'
 
 # Escaped, not interpolated raw. '&' is legal in a Windows path and fatal in
 # XML: a clone under C:\dev\R&D produces a .wsb the sandbox rejects, and it
