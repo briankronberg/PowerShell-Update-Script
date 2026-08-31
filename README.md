@@ -106,7 +106,7 @@ other runs. Check with `Get-ExecutionPolicy -List`.
 | `Update-Everything` | Runs the update pass and returns a result object |
 | `Initialize-UpdateEverything` | Setup menu: prerequisites, scheduled task, developer tools, first run |
 | `Register-UpdateEverythingTask` | Registers the scheduled task. Needs elevation |
-| `Get-UpdateEverythingTask` | Reports the registered task, or nothing if there is none |
+| `Get-UpdateEverythingTask` | Reports every task that runs this module, or nothing if there are none |
 | `Unregister-UpdateEverythingTask` | Removes the task |
 | `Test-PendingReboot` | Reports whether Windows is waiting on a restart, and why |
 
@@ -142,6 +142,27 @@ wants:
 ```powershell
 Initialize-UpdateEverything -Choice DeveloperTools
 ```
+
+### Scheduled tasks
+
+Option 2 lists what is already registered and offers to add another, replace
+one, or remove one.
+
+**Another task, not another trigger.** Every trigger on a task runs the same
+action, so two triggers cannot express "everything but Python daily, only Python
+weekly" — which is the reason for wanting a second run at all. Something pinned
+to a version another application depends on wants its own schedule, not the one
+that keeps everything else current:
+
+```powershell
+Register-UpdateEverythingTask -TaskName 'Update-Everything' -ExcludeTag Python -Cadence Daily
+Register-UpdateEverythingTask -TaskName 'Update-Everything-Python' -Tag Python -Cadence Weekly
+```
+
+`Get-UpdateEverythingTask` finds all of them, **by what they run rather than by
+what they are called**. A task renamed by hand is still this module's task, and a
+task called `Update-Everything` that runs something else is not — which matters,
+because removing it because of its name would be destructive.
 
 ### Developer tools
 
