@@ -667,6 +667,71 @@ Describe 'Repository documentation' -Tag 'Docs' {
     }
 }
 
+Describe 'Nothing shows a parameter the command does not have' -Tag 'Docs' {
+
+    # The installer printed
+    #
+    #     Get-Help Update-Everything -Full
+    #
+    # which is a correct Get-Help call and reads as though -Full were a mode of
+    # Update-Everything. Someone typed "update-everything -full" and got "A
+    # parameter cannot be found that matches parameter name 'full'" from the
+    # first command they ran after installing.
+    #
+    # Anything that follows the command name in text will be read as belonging
+    # to it, whatever the parser thinks, so nothing that is not a real parameter
+    # may sit there.
+
+    BeforeAll {
+        # Comments are not shown to anyone; Write-Host arguments are. Taking the
+        # strings from the AST keeps an explanation of this very bug from
+        # tripping it.
+        $installPath = Join-Path $script:RepoRoot 'Install.ps1'
+        $installAst = [System.Management.Automation.Language.Parser]::ParseFile(
+            $installPath, [ref] $null, [ref] $null)
+
+        $printed = $installAst.FindAll({
+                param($node)
+                $node -is [System.Management.Automation.Language.CommandAst] -and
+                $node.GetCommandName() -in 'Write-Host', 'Write-Output'
+            }, $true) | ForEach-Object {
+            $_.CommandElements |
+                Where-Object { $_ -is [System.Management.Automation.Language.StringConstantExpressionAst] } |
+                ForEach-Object { $_.Value }
+        }
+
+        $aboutPath = Join-Path $script:ModuleRoot 'en-us\about_UpdateEverything.help.txt'
+
+        $script:UserFacingText = @(
+            ($printed -join "`n")
+            $script:Readme
+            (Get-Content $aboutPath -Raw)
+        ) -join "`n"
+
+        $script:RealParameters = (Get-Command Update-Everything).Parameters.Keys
+    }
+
+    It 'shows only real parameters after Update-Everything' {
+        $offenders = foreach ($match in [regex]::Matches($script:UserFacingText, 'Update-Everything((?:\s+-[A-Za-z]\w*)+)')) {
+            foreach ($p in [regex]::Matches($match.Groups[1].Value, '-([A-Za-z]\w*)')) {
+                $name = $p.Groups[1].Value
+                if ($name -notin $script:RealParameters) {
+                    "-$name (in: $($match.Value -replace '\s+', ' '))"
+                }
+            }
+        }
+
+        $offenders | Should-BeNull -Because "these read as parameters of Update-Everything and are not:`n$($offenders -join "`n")"
+    }
+
+    # The command needs no arguments to do its work, and the installer used to
+    # show only a help command and a cut-down run -- so the obvious question,
+    # "how do I just run it", had no answer on screen.
+    It 'tells a new user how to run everything' {
+        ($printed -join "`n") | Should-MatchString '(?m)^\s*Update-Everything\s*$'
+    }
+}
+
 Describe 'Variable hygiene' -Tag 'Static' {
 
     # Set-StrictMode would catch undefined variable reads at run time, but it

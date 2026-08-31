@@ -76,4 +76,4 @@ EXAMPLES
 
 SEE ALSO
     https://github.com/briankronberg/UpdateEverything
-    Get-Help Update-Everything -Full
+    Get-Help -Full -Name Update-Everything

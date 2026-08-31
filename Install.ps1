@@ -215,8 +215,15 @@ try {
     Write-Host "  Scope    : $Scope"
     Write-Host "  Commands : $((Get-Command -Module UpdateEverything -CommandType Function).Name -join ', ')"
     Write-Host ''
-    Write-Host '  Try it without changing anything:'
-    Write-Host '    Get-Help Update-Everything -Full'
+    # -Full goes before the name. Written as "Get-Help Update-Everything -Full"
+    # it is still a correct Get-Help call, but it reads as though -Full were a
+    # mode of Update-Everything, and it was tried as one. Nothing trails the
+    # command name now, so there is nothing to misattribute to it.
+    Write-Host '  Read what it does, without running it:'
+    Write-Host '    Get-Help -Full -Name Update-Everything'
+    Write-Host ''
+    Write-Host '  Run everything:'
+    Write-Host '    Update-Everything'
     Write-Host ''
     Write-Host '  A cautious first run:'
     Write-Host '    Update-Everything -IncludeWindowsUpdate $false -IncludePowerShell7 $false -SetPwshTerminalDefault $false'
