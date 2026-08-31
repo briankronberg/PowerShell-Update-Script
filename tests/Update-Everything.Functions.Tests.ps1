@@ -2074,3 +2074,40 @@ Describe 'The setup menu loop' -Tag 'Unit' {
         Should-Invoke Invoke-SetupChoice -ParameterFilter { $Key -eq 'ScheduledTask' }
     }
 }
+
+Describe 'The first run points at the setup menu' -Tag 'Static' {
+
+    BeforeAll {
+        $script:FirstRunSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    It 'decides by looking for a previous transcript' {
+        $script:FirstRunSource | Should-MatchString "\`$isFirstRun = -not @\(Get-ChildItem"
+    }
+
+    # Both would answer it wrongly: pruning can empty the directory on a machine
+    # that has simply not run in a while, and the transcript would find its own
+    # log and conclude the run had happened before.
+    It 'asks before pruning and before the transcript starts' {
+        $decided = $script:FirstRunSource.IndexOf('$isFirstRun = -not')
+        $pruned  = $script:FirstRunSource.IndexOf('$cutoff = (Get-Date).AddDays')
+        $started = $script:FirstRunSource.IndexOf('Start-Transcript -Path $mainLog')
+
+        $decided | Should-BeGreaterThan -1
+        $decided | Should-BeLessThan $pruned
+        $decided | Should-BeLessThan $started
+    }
+
+    It 'names the command it is pointing at' {
+        $script:FirstRunSource | Should-MatchString 'Initialize-UpdateEverything sets up'
+    }
+
+    # A tool that repeats advice on every run teaches people to skim past its
+    # output, which costs more than the hint gains.
+    It 'says it once, and only when it is the first run' {
+        $mentions = [regex]::Matches($script:FirstRunSource, 'That was the first run')
+        $mentions.Count | Should-Be 1
+        $script:FirstRunSource | Should-MatchString 'if \(\$isFirstRun\)'
+    }
+}

@@ -297,6 +297,13 @@
     $script:runStamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $mainLog  = Join-Path $logDir "Update-Everything-$runStamp.log"
 
+    # Asked before pruning and before the transcript is started, both of which
+    # would otherwise answer it wrongly: pruning can empty the directory on a
+    # machine that has simply not run in a while, and the transcript would find
+    # its own log and conclude the run had happened before.
+    $isFirstRun = -not @(Get-ChildItem -LiteralPath $logDir -Filter 'Update-Everything-*.log' `
+        -File -ErrorAction SilentlyContinue).Count
+
     # Step logs rotate per run rather than being appended to forever, so old ones
     # (and stale Terminal settings backups) are pruned by age instead.
     if ($LogRetentionDays -gt 0) {
@@ -1314,6 +1321,16 @@
         # unrequested one.
         Write-Host ''
         Write-Host 'Notifications: not requested. Pass -Notify for a toast when the run finishes.' -ForegroundColor DarkGray
+    }
+
+    # Said at the end rather than at the start: by here the run has shown what
+    # this machine has and has not, which is what makes the suggestion concrete.
+    # Once, and only on the first run -- a tool that repeats advice on every run
+    # teaches people to skim past its output.
+    if ($isFirstRun) {
+        Write-Host ''
+        Write-Host 'That was the first run on this machine. Initialize-UpdateEverything sets up a' -ForegroundColor Cyan
+        Write-Host 'schedule, installs the tools this then keeps updated, and asks before each one.' -ForegroundColor Cyan
     }
 
     Write-Host "Finished $(Get-Date). Detailed logs saved to: $logDir" -ForegroundColor Green
