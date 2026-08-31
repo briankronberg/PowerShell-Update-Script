@@ -40,15 +40,39 @@ only, discarded afterwards.
 - The machine really is fresh — `pwsh` is absent before anything runs
 - The install command **from README.md**, run twice. The second run is what
   `-Force` exists for
+- The module imported and the run reached its summary, with `FailedCount` a
+  number
 - The payload ran with no administrator rights, so self-elevation was exercised
 - **Two** transcripts appeared: the parent's, recording the handoff, and the
   elevated child's own. One means the child died before it could log, which is
   precisely how the relaunch parse error presented
-- A transcript reached the summary, and `FailedCount` came back a number
 
 The install command is read out of `README.md` rather than copied here. A smoke
 test carrying its own copy tests the copy, and two of the three defects above
 were *in* the documented command.
+
+## What it does not check, in Windows Sandbox
+
+**The last two are reported `N/A` here, and the elevation path is not covered.**
+
+Windows Sandbox ships with UAC off, and turning it back on needs a restart a
+disposable machine cannot perform. With `EnableLUA=0` there is no split token:
+everything runs elevated, `RunLevel Limited` cannot produce an unelevated child,
+and `Update-Everything` never reaches self-elevation at all.
+
+So of the three defects that motivated this, Sandbox covers two — the missing
+`pwsh` and the `-Force` reinstall — and **not** the relaunch parse error, which
+was the worst of them.
+
+The first version of this harness reported those checks as failures. That was
+wrong in a way worth naming: it showed red for something the module did not do,
+and a suite that cries wolf is one people stop reading. They now report `N/A`
+with the reason, the run still passes, and the summary says how many checks it
+could not make.
+
+Real elevation coverage needs a VM that can boot with UAC on — a Hyper-V
+checkpoint restored between runs. That is a heavier harness than this one and
+has not been built.
 
 ## The UAC part
 

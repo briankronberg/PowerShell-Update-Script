@@ -47,15 +47,32 @@ $transcript = Join-Path $OutputPath 'harness.log'
 Start-Transcript -Path $transcript -Force | Out-Null
 
 $checks = [System.Collections.Generic.List[object]]::new()
+
 function Add-Check {
     param(
         [Parameter(Mandatory)][string] $Name,
         [Parameter(Mandatory)][bool]   $Passed,
         [string] $Detail
     )
-    $checks.Add([pscustomobject]@{ Name = $Name; Passed = $Passed; Detail = $Detail })
-    $mark = if ($Passed) { 'PASS' } else { 'FAIL' }
-    Write-Output ("  [{0}] {1}{2}" -f $mark, $Name, $(if ($Detail) { " -- $Detail" } else { '' }))
+    $status = if ($Passed) { 'PASS' } else { 'FAIL' }
+    $checks.Add([pscustomobject]@{ Name = $Name; Status = $status; Passed = $Passed; Detail = $Detail })
+    Write-Output ("  [{0}] {1}{2}" -f $status, $Name, $(if ($Detail) { " -- $Detail" } else { '' }))
+}
+
+function Add-NotApplicable {
+    # A third state, because two are not enough. Windows Sandbox runs with UAC
+    # off, so the elevation checks cannot be exercised here at all -- and
+    # reporting that as FAIL is worse than useless: it is red for something the
+    # code did not do wrong, which is how people learn to ignore a suite.
+    param(
+        [Parameter(Mandatory)][string] $Name,
+        [Parameter(Mandatory)][string] $Reason
+    )
+    # Passed is $null rather than $true. Not applicable is not a pass, and the
+    # overall verdict counts failures rather than adding up passes, so a check
+    # that could not run neither helps nor hurts.
+    $checks.Add([pscustomobject]@{ Name = $Name; Status = 'N/A'; Passed = $null; Detail = $Reason })
+    Write-Output ("  [N/A ] {0} -- {1}" -f $Name, $Reason)
 }
 
 try {
@@ -72,15 +89,36 @@ try {
 
     Write-Output ''
     Write-Output '== UAC =='
-    # EnableLUA stays 1 so Test-ElevationCapability still allows the run.
     # ConsentPromptBehaviorAdmin 0 means "elevate without prompting", which is
-    # what lets the child start with nobody at the keyboard.
+    # what would let an elevated child start with nobody at the keyboard.
     $policy = 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System'
     Set-ItemProperty -Path $policy -Name 'ConsentPromptBehaviorAdmin' -Value 0 -Type DWord
     $enableLua = (Get-ItemProperty -Path $policy -Name 'EnableLUA').EnableLUA
     $consent   = (Get-ItemProperty -Path $policy -Name 'ConsentPromptBehaviorAdmin').ConsentPromptBehaviorAdmin
     Write-Output "  EnableLUA=$enableLua ConsentPromptBehaviorAdmin=$consent"
-    Add-Check -Name 'UAC still enabled' -Passed ($enableLua -eq 1) -Detail "EnableLUA=$enableLua"
+
+    # Windows Sandbox ships with UAC off, and turning it back on needs a restart
+    # that a disposable machine cannot perform. With EnableLUA at 0 there is no
+    # split token: everything runs elevated, RunLevel Limited cannot produce an
+    # unelevated child, and Update-Everything never reaches the self-elevation
+    # path at all.
+    #
+    # That is a limit of this harness, not a fault in the module, so the checks
+    # it makes impossible are reported as not applicable. The first run of this
+    # test reported them as failures, which said the module was broken when the
+    # sandbox simply could not ask the question.
+    $script:UacAvailable = ($enableLua -eq 1)
+
+    if ($script:UacAvailable) {
+        Add-Check -Name 'UAC is on, so elevation can be exercised' -Passed $true -Detail "EnableLUA=$enableLua"
+    } else {
+        Add-NotApplicable -Name 'UAC is on, so elevation can be exercised' `
+            -Reason "EnableLUA=$enableLua; Windows Sandbox runs with UAC off and cannot restart to change it"
+        Write-Output ''
+        Write-Output '  NOTE: the self-elevation path is NOT covered by this run.'
+        Write-Output '        Install, reinstall and the update pass are. Real elevation coverage'
+        Write-Output '        needs a VM that can boot with UAC on.'
+    }
 
     Write-Output ''
     Write-Output '== Install command, taken from README =='
@@ -175,8 +213,13 @@ try {
     $run = Get-Content $runResult -Raw | ConvertFrom-Json
     Write-Output "  ran as $($run.User), elevated=$($run.Elevated)"
 
-    Add-Check -Name 'payload ran without administrator rights' -Passed (-not $run.Elevated) `
-        -Detail "elevated=$($run.Elevated)"
+    if ($script:UacAvailable) {
+        Add-Check -Name 'payload ran without administrator rights' -Passed (-not $run.Elevated) `
+            -Detail "elevated=$($run.Elevated)"
+    } else {
+        Add-NotApplicable -Name 'payload ran without administrator rights' `
+            -Reason "elevated=$($run.Elevated); with UAC off there is no split token to drop, so RunLevel Limited cannot de-elevate"
+    }
     Add-Check -Name 'module imported after install' -Passed ([bool] $run.Imported)
     Add-Check -Name 'run reported no error' -Passed ([string]::IsNullOrEmpty($run.Error)) -Detail $run.Error
 
@@ -190,8 +233,17 @@ try {
     # Two: the parent's, which records the handoff, and the elevated child's own.
     # One means the child died before it could log -- which is exactly how the
     # relaunch parse error presented, and why counting them is the assertion.
-    Add-Check -Name 'both parent and elevated child left a transcript' -Passed ($new.Count -ge 2) `
-        -Detail "$($new.Count) found"
+    #
+    # It only counts for anything where elevation could happen. With UAC off the
+    # run is already elevated, so there is no handoff and one transcript is the
+    # correct answer rather than a symptom.
+    if ($script:UacAvailable) {
+        Add-Check -Name 'both parent and elevated child left a transcript' -Passed ($new.Count -ge 2) `
+            -Detail "$($new.Count) found"
+    } else {
+        Add-NotApplicable -Name 'both parent and elevated child left a transcript' `
+            -Reason "$($new.Count) found; with UAC off the run is already elevated, so there is no handoff to record"
+    }
 
     $childReachedSummary = $false
     foreach ($name in $new) {
@@ -210,14 +262,27 @@ try {
     Write-Output "HARNESS ERROR: $($_.Exception.Message)"
 }
 
+# Counts failures rather than adding up passes, so a check that could not run
+# neither helps nor hurts. A green result here means nothing failed, not that
+# everything was covered -- which is what NotCovered exists to say out loud.
+$failed    = @($checks | Where-Object { $_.Status -eq 'FAIL' })
+$notCovered = @($checks | Where-Object { $_.Status -eq 'N/A' })
+
 $summary = [pscustomobject]@{
-    Finished = (Get-Date).ToString('o')
-    Passed   = @($checks | Where-Object { -not $_.Passed }).Count -eq 0
-    Checks   = $checks.ToArray()
+    Finished   = (Get-Date).ToString('o')
+    Passed     = $failed.Count -eq 0
+    NotCovered = $notCovered.Count
+    Checks     = $checks.ToArray()
 }
 
 Write-Output ''
-Write-Output "== $(if ($summary.Passed) { 'ALL CHECKS PASSED' } else { 'FAILURES PRESENT' }) =="
+if ($failed.Count -gt 0) {
+    Write-Output "== $($failed.Count) FAILURE(S) =="
+} elseif ($notCovered.Count -gt 0) {
+    Write-Output "== PASSED, with $($notCovered.Count) check(s) this machine could not run =="
+} else {
+    Write-Output '== ALL CHECKS PASSED =='
+}
 
 [System.IO.File]::WriteAllText(
     (Join-Path $OutputPath 'result.json'),
