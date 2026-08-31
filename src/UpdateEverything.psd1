@@ -17,6 +17,7 @@
 
     FunctionsToExport = @(
         'Update-Everything'
+        'Initialize-UpdateEverything'
         'Register-UpdateEverythingTask'
         'Unregister-UpdateEverythingTask'
         'Get-UpdateEverythingTask'
