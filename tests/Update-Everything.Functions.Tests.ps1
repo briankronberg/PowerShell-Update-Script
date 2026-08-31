@@ -1586,7 +1586,7 @@ Describe 'Every step declares a tag' -Tag 'Static' {
 
         # The set both public entry points validate against.
         $script:DeclaredTags = @('Windows', 'Microsoft', 'PowerShell', 'PackageManager',
-                                 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self')
+                                 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')
     }
 
     It 'found the steps to check' {
@@ -1625,5 +1625,65 @@ Describe 'Every step declares a tag' -Tag 'Static' {
             Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) $file) -Raw |
                 Should-MatchString "\`$$parameter = @\(\)"
         }
+    }
+}
+
+Describe 'Get-UpdateToolInventory' -Tag 'Unit' {
+
+    # A catalogue is passed in rather than using the real one, so the test does
+    # not depend on what happens to be installed on the machine running it.
+
+    BeforeAll {
+        $script:RealTool  = @{ Name = 'PowerShell'; Command = 'powershell'; VersionArgument = $null }
+        $script:FakeTool  = @{ Name = 'Nothing';    Command = 'ue-no-such-tool-7f3a1c'; VersionArgument = '--version' }
+    }
+
+    It 'reports a tool that is on the machine as present' {
+        $r = Get-UpdateToolInventory -Catalogue @($script:RealTool)
+        $r.Present | Should-BeTrue
+    }
+
+    It 'reports a tool that is not as absent' {
+        $r = Get-UpdateToolInventory -Catalogue @($script:FakeTool)
+        $r.Present | Should-BeFalse
+    }
+
+    It 'gives an absent tool no version, owner or place' {
+        $r = Get-UpdateToolInventory -Catalogue @($script:FakeTool)
+        $r.Version | Should-BeNull
+        $r.Owner   | Should-BeNull
+        $r.Copies  | Should-Be 0
+    }
+
+    It 'returns one record per catalogue entry' {
+        $r = @(Get-UpdateToolInventory -Catalogue @($script:RealTool, $script:FakeTool))
+        $r | Should-BeCollection -Count 2
+    }
+
+    It 'carries the friendly name through, not just the command' {
+        (Get-UpdateToolInventory -Catalogue @($script:FakeTool)).Name | Should-Be 'Nothing'
+    }
+
+    # PATHEXT resolves npm.cmd and npm from one folder as two commands. Counting
+    # files would report a single install as a conflict, and a warning that cries
+    # wolf is one people stop reading.
+    It 'counts places rather than executables' {
+        $r = Get-UpdateToolInventory -Catalogue @($script:RealTool)
+        $r.Copies | Should-Be @($r.Places).Count
+    }
+
+    It 'does not let a tool that fails its version argument fail the inventory' {
+        # A real executable given an argument it rejects.
+        $bad = @{ Name = 'Bad'; Command = 'powershell'; VersionArgument = '--definitely-not-a-flag' }
+
+        $r = Get-UpdateToolInventory -Catalogue @($bad)
+        $r.Present | Should-BeTrue
+    }
+
+    It 'leaves no non-zero exit code behind for the step runner to fail on' {
+        $bad = @{ Name = 'Bad'; Command = 'powershell'; VersionArgument = '--definitely-not-a-flag' }
+
+        $null = Get-UpdateToolInventory -Catalogue @($bad)
+        $LASTEXITCODE | Should-Be 0
     }
 }

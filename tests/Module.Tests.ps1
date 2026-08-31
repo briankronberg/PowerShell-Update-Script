@@ -967,15 +967,34 @@ Describe 'The summary is displayed, not returned' -Tag 'Static','Module' {
     # summary table stopped being displayed and started being returned, so the
     # caller got an array of formatting objects with the result buried in it and
     # the run log lost its summary entirely.
+    # The AST, not a text search. A line search also matches a comment that
+    # explains why Format-Table is not used somewhere, which formats nothing.
     It 'sends Format-Table to the host rather than the pipeline' {
-        $source = Get-Content (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1') -Raw
+        $ast = [System.Management.Automation.Language.Parser]::ParseFile(
+            (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1'), [ref] $null, [ref] $null)
 
-        $formats = [regex]::Matches($source, '(?m)^.*Format-Table.*$')
+        $formats = @($ast.FindAll({
+                    param($n)
+                    $n -is [System.Management.Automation.Language.CommandAst] -and
+                    $n.GetCommandName() -eq 'Format-Table'
+                }, $true))
+
         $formats.Count | Should-BeGreaterThan 0
 
-        foreach ($f in $formats) {
-            $f.Value | Should-MatchString 'Out-Host'
+        $offenders = foreach ($f in $formats) {
+            $pipeline = $f.Parent
+            while ($pipeline -and $pipeline -isnot [System.Management.Automation.Language.PipelineAst]) {
+                $pipeline = $pipeline.Parent
+            }
+
+            $last = $pipeline.PipelineElements[-1]
+            if ($last -isnot [System.Management.Automation.Language.CommandAst] -or
+                $last.GetCommandName() -ne 'Out-Host') {
+                "line $($f.Extent.StartLineNumber): $($pipeline.Extent.Text -replace '\s+', ' ')"
+            }
         }
+
+        $offenders | Should-BeNull -Because "these return formatting objects instead of displaying them:`n$($offenders -join "`n")"
     }
 }
 
@@ -1028,7 +1047,10 @@ Describe 'No step updates through a tool it has not verified' -Tag 'Static','Mod
             # Windows, so Get-PackageProvider and Find-Module always resolve.
             # The step reports each component it did not find rather than
             # driving anything it has not confirmed.
-            'Gallery tooling'
+            'Gallery tooling',
+            # Resolves every tool it reports on, and reports absence as absence.
+            # Running nothing it has not found is the whole job.
+            'Inventory'
         )
 
         $offenders = foreach ($call in $ast.FindAll({

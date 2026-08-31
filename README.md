@@ -182,12 +182,32 @@ thing that crosses a process boundary.
 more of:
 
 `Windows` `Microsoft` `PowerShell` `PackageManager` `Python` `Node` `DotNet`
-`Rust` `Git` `Self`
+`Rust` `Git` `Self` `Inventory`
 
 ```powershell
 Update-Everything -Tag Python
 Update-Everything -ExcludeTag Python
 ```
+
+`-Tag Inventory` reports what the machine has and updates nothing, which is the
+quickest way to see why a run skipped what it skipped:
+
+```
+9 of 14 tools present.
+
+  winget           Unknown     v1.29.290
+  PowerShell 7     Unknown     PowerShell 7.6.5
+  uv               Standalone  uv 0.12.7
+
+Not installed: .NET SDK, Chocolatey, pipx, rustup, Scoop
+Their steps report Skipped, which is the expected result rather than a fault.
+
+WARNING: PowerShell 7 is installed in 2 places; the first is the one that runs:
+         C:\Program Files\PowerShell; ...\WindowsApps
+```
+
+That last warning is worth reading. A tool installed twice is updated by
+whichever manager owns the copy you are not running.
 
 Both may be given at once and exclusion wins, so `-Tag Python -ExcludeTag Node`
 is not a contradiction and `-Tag Python -ExcludeTag Python` selects nothing
