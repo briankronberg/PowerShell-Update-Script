@@ -39,25 +39,7 @@ function Invoke-SetupChoice {
                 -IncludePowerShellModules $false
         }
 
-        'ScheduledTask' {
-            Write-Host ''
-            if (Get-UpdateEverythingTask) {
-                Write-Host 'A scheduled task is already registered:' -ForegroundColor Yellow
-                Get-UpdateEverythingTask | Format-Table -AutoSize | Out-Host
-                Write-Host 'Use Register-UpdateEverythingTask to replace it, or Unregister-UpdateEverythingTask to remove it.' -ForegroundColor DarkGray
-                return
-            }
-
-            Write-Host 'Registering a weekly task that runs as you, elevated, with notifications.' -ForegroundColor Cyan
-            Write-Host 'Registering a scheduled task needs administrator rights.' -ForegroundColor DarkGray
-            Write-Host ''
-
-            try {
-                Register-UpdateEverythingTask -Cadence Weekly -Notify $true -ErrorAction Stop
-            } catch {
-                Write-Warning "Could not register the task: $($_.Exception.Message)"
-            }
-        }
+        'ScheduledTask' { Invoke-TaskSetup }
 
         'DeveloperTools' {
             $catalogue = @(Get-DeveloperToolCatalogue)

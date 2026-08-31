@@ -447,3 +447,199 @@ Describe 'Get-PowerShellHostPath' -Tag 'Unit' {
         Get-PowerShellHostPath | Should-MatchString 'powershell\.exe$'
     }
 }
+
+Describe 'Finding every task this module registered' -Tag 'Unit' {
+
+    # Found by what they run, not by what they are called. A machine can carry
+    # several: a daily run that skips a toolchain and a monthly one that updates
+    # only that toolchain, which is what -Tag and -ExcludeTag are for.
+
+    BeforeAll {
+        $script:MakeTask = {
+            param($Name, $Arguments)
+            [pscustomobject]@{
+                TaskName  = $Name
+                TaskPath  = '\'
+                State     = 'Ready'
+                Principal = [pscustomobject]@{ UserId = 'me'; RunLevel = 'Highest'; LogonType = 'Interactive' }
+                Actions   = @([pscustomobject]@{ Execute = 'pwsh.exe'; Arguments = $Arguments })
+            }
+        }
+
+        $script:Ours = "-NoProfile -Command `"Import-Module 'C:\M\UpdateEverything\1.0.0\UpdateEverything.psd1' -Force; exit (Update-Everything -Notify).FailedCount`""
+        $script:Theirs = '-NoProfile -Command "Write-Host hello"'
+    }
+
+    BeforeEach {
+        # Task Scheduler reports a never-run task with the 1899 sentinel rather
+        # than a null, and Format-LastRunResult takes a [datetime].
+        Mock Get-ScheduledTaskInfo {
+            [pscustomobject]@{
+                LastRunTime    = [datetime]'1899-12-30'
+                LastTaskResult = 267011
+                NextRunTime    = [datetime]'2026-09-07 03:00'
+            }
+        }
+    }
+
+    It 'returns every task that runs this module' {
+        Mock Get-ScheduledTask {
+            @(
+                & $script:MakeTask 'Update-Everything' $script:Ours
+                & $script:MakeTask 'Update-Everything-Python' $script:Ours
+            )
+        }
+
+        @(Get-UpdateEverythingTask) | Should-BeCollection -Count 2
+    }
+
+    # A task called Update-Everything that runs something else is not this
+    # module's, and removing it because of its name would be destructive.
+    It 'ignores a task that only shares the name' {
+        Mock Get-ScheduledTask {
+            @(& $script:MakeTask 'Update-Everything' $script:Theirs)
+        }
+
+        Get-UpdateEverythingTask | Should-BeNull
+    }
+
+    # A task renamed by hand is still this module's task.
+    It 'finds one that was renamed' {
+        Mock Get-ScheduledTask {
+            @(& $script:MakeTask 'Nightly maintenance' $script:Ours)
+        }
+
+        (Get-UpdateEverythingTask).TaskName | Should-Be 'Nightly maintenance'
+    }
+
+    It 'returns nothing when none are registered' {
+        Mock Get-ScheduledTask { @() }
+
+        Get-UpdateEverythingTask | Should-BeNull
+    }
+
+    It 'still takes one by exact name' {
+        Mock Get-ScheduledTask { @(& $script:MakeTask 'Update-Everything-Python' $script:Ours) } `
+            -ParameterFilter { $TaskName -eq 'Update-Everything-Python' }
+
+        (Get-UpdateEverythingTask -TaskName 'Update-Everything-Python').TaskName |
+            Should-Be 'Update-Everything-Python'
+    }
+}
+
+Describe 'Select-TaskFromList' -Tag 'Unit' {
+
+    BeforeAll {
+        $script:Two = @(
+            [pscustomobject]@{ TaskName = 'one' }
+            [pscustomobject]@{ TaskName = 'two' }
+        )
+    }
+
+    It 'returns the task at the number typed' {
+        Mock Read-Host { '2' }
+        (Select-TaskFromList -Task $script:Two -Prompt 'x').TaskName | Should-Be 'two'
+    }
+
+    It 'returns nothing for a blank answer' {
+        Mock Read-Host { '' }
+        Select-TaskFromList -Task $script:Two -Prompt 'x' | Should-BeNull
+    }
+
+    # Acting on a mistyped number would be worse than asking again.
+    It 'returns nothing for a number that is not listed' {
+        Mock Read-Host { '9' }
+        Mock Write-Host { }
+        Select-TaskFromList -Task $script:Two -Prompt 'x' | Should-BeNull
+    }
+
+    It 'returns nothing for an answer that is not a number' {
+        Mock Read-Host { 'both' }
+        Mock Write-Host { }
+        Select-TaskFromList -Task $script:Two -Prompt 'x' | Should-BeNull
+    }
+
+    It 'returns nothing when there is nothing to choose from' {
+        Select-TaskFromList -Task @() -Prompt 'x' | Should-BeNull
+    }
+}
+
+Describe 'Adding a second task' -Tag 'Unit' {
+
+    # A second task, not a second trigger. Every trigger on a task runs the same
+    # action, so two triggers cannot express "everything but Python daily, only
+    # Python monthly" -- which is the reason for wanting a second run at all.
+
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Register-UpdateEverythingTask { }
+        Mock Get-UpdateEverythingTask { @([pscustomobject]@{ TaskName = 'Update-Everything' }) }
+    }
+
+    It 'suggests a name that is not already taken' {
+        $script:answers = @('', '', '', '')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        New-TaskFromPrompt
+
+        Should-Invoke Register-UpdateEverythingTask -ParameterFilter { $TaskName -eq 'Update-Everything-2' }
+    }
+
+    It 'passes the tags through, which is the whole point of a second task' {
+        $script:answers = @('Update-Everything-Python', 'Daily', 'Python', '')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        New-TaskFromPrompt
+
+        Should-Invoke Register-UpdateEverythingTask -ParameterFilter {
+            $TaskName -eq 'Update-Everything-Python' -and $Cadence -eq 'Daily' -and $Tag -contains 'Python'
+        }
+    }
+
+    It 'passes an exclusion through' {
+        $script:answers = @('daily-task', 'Daily', '', 'Python')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        New-TaskFromPrompt
+
+        Should-Invoke Register-UpdateEverythingTask -ParameterFilter { $ExcludeTag -contains 'Python' }
+    }
+
+    # PatchTuesday is a real cadence of Register-UpdateEverythingTask and is not
+    # offered here, because it cannot register at all -- see issue #36. Catching
+    # it here turns a binding failure into a sentence.
+    It 'refuses a cadence it does not offer' {
+        $script:answers = @('x', 'PatchTuesday', '', '')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        New-TaskFromPrompt -WarningAction SilentlyContinue
+
+        Should-NotInvoke Register-UpdateEverythingTask
+    }
+
+    # A tag outside the set selects nothing, so the task would run an empty pass
+    # every month and report success.
+    It 'refuses a tag that is not a real tag' {
+        $script:answers = @('x', 'Weekly', 'Pythonn', '')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        New-TaskFromPrompt -WarningAction SilentlyContinue
+
+        Should-NotInvoke Register-UpdateEverythingTask
+    }
+
+    It 'replaces rather than refusing when told to' {
+        $script:answers = @('', 'Weekly', '', '')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+
+        New-TaskFromPrompt -DefaultName 'Update-Everything' -Replace
+
+        Should-Invoke Register-UpdateEverythingTask -ParameterFilter { $Force }
+    }
+}
