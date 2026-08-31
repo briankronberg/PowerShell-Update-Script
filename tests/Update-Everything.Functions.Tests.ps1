@@ -1548,6 +1548,49 @@ Describe 'Test-StepTagMatch' -Tag 'Unit' {
     }
 }
 
+Describe 'The skip reason names the filter that refused the step' -Tag 'Unit' {
+
+    # Exclusion wins when both filters are given, so a reason worked out by
+    # asking "was -Tag set" first blames -Tag for an exclusion and sends someone
+    # looking at the wrong parameter.
+
+    BeforeEach {
+        $script:logDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $script:logDir -Force
+        $script:runStamp = 'reason'
+        $script:isAdmin = $true
+        $script:Results = [System.Collections.Generic.List[object]]::new()
+        $script:TagFilter = @()
+        $script:ExcludeTagFilter = @()
+    }
+
+    It 'blames -ExcludeTag when that is what refused it' {
+        $script:TagFilter = @('PowerShell')
+        $script:ExcludeTagFilter = @('Windows')
+
+        Invoke-Step -Name 'both' -Tag 'PowerShell', 'Windows' -Action { 'x' } 6>$null
+
+        $script:Results[0].Status | Should-Be 'Skipped'
+    }
+
+    It 'blames -Tag when nothing was excluded' {
+        $script:TagFilter = @('Python')
+
+        Invoke-Step -Name 'other' -Tag 'Node' -Action { 'x' } 6>$null
+
+        $script:Results[0].Status | Should-Be 'Skipped'
+    }
+
+    It 'runs a step that survives both filters' {
+        $script:TagFilter = @('PowerShell')
+        $script:ExcludeTagFilter = @('Windows')
+
+        Invoke-Step -Name 'kept' -Tag 'PowerShell' -Action { 'x' } 6>$null
+
+        $script:Results[0].Status | Should-Be 'OK'
+    }
+}
+
 Describe 'Every step declares a tag' -Tag 'Static' {
 
     # A step with no tag is invisible to -Tag and unstoppable by -ExcludeTag, so
@@ -1753,5 +1796,92 @@ Describe 'Step order' -Tag 'Static' {
     It 'installs PowerShell 7 before pointing Terminal at it' {
         (& $script:PositionOf 'PowerShell 7 (latest)') |
             Should-BeLessThan (& $script:PositionOf 'Windows Terminal default = PowerShell 7')
+    }
+}
+
+Describe 'Get-ModuleVersionMap' -Tag 'Unit' {
+
+    It 'returns a hashtable keyed on module name' {
+        $map = Get-ModuleVersionMap
+        $map | Should-HaveType ([hashtable])
+    }
+
+    It 'finds the module running these tests' {
+        (Get-ModuleVersionMap).ContainsKey('Pester') | Should-BeTrue
+    }
+
+    # A module is installed side by side, one folder per version, so the same
+    # name arrives more than once and the highest is the one that binds.
+    It 'keeps the highest version of a name installed more than once' {
+        $map = Get-ModuleVersionMap
+        $highest = @(Get-Module Pester -ListAvailable | Sort-Object Version -Descending)[0].Version
+
+        $map['Pester'] | Should-Be $highest
+    }
+
+    It 'reports a version, not a string' {
+        (Get-ModuleVersionMap)['Pester'] | Should-HaveType ([version])
+    }
+}
+
+Describe 'The PowerShell modules step' -Tag 'Static' {
+
+    BeforeAll {
+        $script:ModSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    # Update-Module and Update-PSResource are both silent on success, so the
+    # step reported OK and a duration and nothing else. Forty updates and none
+    # read the same.
+    It 'takes a version map either side of the pass' {
+        $script:ModSource | Should-MatchString '\$before = Get-ModuleVersionMap'
+        $script:ModSource | Should-MatchString '\$after = Get-ModuleVersionMap'
+    }
+
+    It 'reports what moved rather than only that it finished' {
+        $script:ModSource | Should-MatchString 'module\(s\) updated'
+    }
+
+    It 'says so when nothing needed updating' {
+        $script:ModSource | Should-MatchString 'No modules needed updating'
+    }
+
+    It 'can be turned off' {
+        $script:ModSource | Should-MatchString 'if \(-not \$IncludePowerShellModules\)'
+    }
+
+    # Skipped rather than dropped, so the summary still accounts for every step.
+    It 'reports the step as skipped rather than removing it' {
+        $script:ModSource | Should-MatchString "Add-SkippedStep -Name 'PowerShell modules'"
+    }
+}
+
+Describe 'Updating the module itself' -Tag 'Static' {
+
+    BeforeAll {
+        $script:SelfSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    It 'defaults to the published release rather than the branch' {
+        $script:SelfSource | Should-MatchString "\`$UpdateSelfSource = 'Gallery'"
+    }
+
+    It 'still offers the branch' {
+        $script:SelfSource | Should-MatchString "ValidateSet\('Gallery', 'Main'\)"
+    }
+
+    # The gallery path reuses the same check the tooling step needed: a copy the
+    # GitHub installer put there was not installed by PowerShellGet, and
+    # Update-Module refuses it.
+    It 'notices a copy the gallery cannot move, and names the way forward' {
+        $script:SelfSource | Should-MatchString 'was not installed from the gallery'
+        $script:SelfSource | Should-MatchString '-UpdateSelfSource Main'
+    }
+
+    It 'says an update lands on the next run, on both paths' {
+        $matches = [regex]::Matches($script:SelfSource, 'loads on the next run')
+        $matches.Count | Should-BeGreaterThanOrEqual 2
     }
 }

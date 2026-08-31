@@ -162,6 +162,7 @@ thing that crosses a process boundary.
 | `-IncludeWindowsUpdate` | `$true` | Install pending updates via PSWindowsUpdate, scanning Microsoft Update so Office and other Microsoft products come along with the OS and drivers. Needs admin; may require a reboot. |
 | `-IncludePowerShell7` | `$true` | Install or upgrade PowerShell 7. The machine-wide MSI install needs admin. |
 | `-SetPwshTerminalDefault` | `$true` | Point Windows Terminal's default profile at PowerShell 7. Per-user; skipped if Terminal is not installed. |
+| `-IncludePowerShellModules` | `$true` | Update every installed PowerShell module. Set to `$false` when one is pinned to a version something else depends on. |
 | `-AutoReboot` | off | Let Windows Update reboot on its own. Off by default; the run reports a pending reboot instead. |
 | `-IncludePrerelease` | off | Include prerelease builds where supported, currently PowerShell module updates. |
 | `-UpdateGlobalNpm` | off | Upgrade global npm packages as well as npm itself. Off by default because global upgrades can break pinned toolchains. |
@@ -174,7 +175,8 @@ thing that crosses a process boundary.
 | `-Tag` | *(all)* | Run only the steps carrying one of these tags. Everything else is reported as skipped. |
 | `-ExcludeTag` | *(none)* | Run everything except the steps carrying one of these tags. Exclusion wins when both are given. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
-| `-UpdateSelf` | off | Reinstall this module from GitHub first, whether or not the version differs. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. Off by default because it fetches and runs an installer from a branch. |
+| `-UpdateSelf` | off | Update this module before anything else. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. |
+| `-UpdateSelfSource` | `Gallery` | Where `-UpdateSelf` gets it from. `Gallery` is the newest published release; `Main` is the development head, fetched from GitHub. |
 
 ## Selecting steps
 
