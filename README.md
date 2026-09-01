@@ -398,7 +398,7 @@ choose the packages; the manager's own inventory does.
 | Chocolatey | `choco` | `choco upgrade all -y` | Everything installed as a Chocolatey package. Exit codes 1641 and 3010 pass, since those are the MSI "reboot required" codes rather than failures. |
 | Scoop | `scoop` | `scoop update`, `scoop update *`, `scoop cleanup *`, each run on its own | Scoop, its buckets, installed apps, then old versions. The phases run separately so a broken bucket cannot hide the rest. |
 | npm | `npm` | `npm install -g npm@latest`, then `npm update -g` only with `-UpdateGlobalNpm` | npm itself, every run. Global packages only on request, because upgrading them can move a pinned toolchain. |
-| pip | `python`, else `py` | `python -m pip install --upgrade pip` | pip itself, for the interpreter that resolves on `PATH`. Installed packages are left alone -- see [Python](#python). |
+| pip | `py`, else `python` | `<interpreter> -m pip install --upgrade pip --disable-pip-version-check` | pip itself, for the first of those found. Where `py` is present that is the launcher's default interpreter, which is not always the `python` on `PATH`. Installed packages are left alone -- see [Python](#python). |
 | pipx | `pipx` | `pipx upgrade-all` | Every Python application pipx installed. |
 | uv | `uv`, plus an ownership check | `uv self update` | uv itself, and only when nothing else owns it. |
 | Python Install Manager | `pymanager`, else `py` | `pymanager install --update` | Installed Python runtimes. |

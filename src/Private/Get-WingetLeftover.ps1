@@ -12,10 +12,12 @@ function Get-WingetLeftover {
                       often fixable -- a package whose executable is running
                       cannot be replaced until it is closed.
 
-          Skipped     winget listed it and never tried, usually because a newer
-                      version does not apply to this system. That is permanent
-                      until the vendor ships something that does, and reporting
-                      it as a failure every run teaches people to skim past it.
+          Skipped     winget listed it and never tried. Usually "a newer package
+                      version is available in a configured source, but it does
+                      not apply to your system or requirements", which is
+                      permanent until the vendor ships something that applies.
+                      Reporting it as a failure every run teaches people to skim
+                      past it.
 
         Attempted is decided by winget's own "Found <name> [<id>]" line. The rest
         of the output is localised prose.
