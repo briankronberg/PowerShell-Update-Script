@@ -2452,3 +2452,51 @@ remove: Access is denied.: "C:\...\WinGet\Packages\astral-sh.uv_...\uv.exe"
         $uv.Available | Should-Be '0.12.7'
     }
 }
+
+Describe 'Errors reach the person watching the run' -Tag 'Unit' {
+
+    # An error is transcribed twice: once when PowerShell raises it, once when
+    # the step pipeline displays it. Investigated under #49 and left alone, and
+    # this is the test that stops it being "tidied up" later.
+    #
+    # Measured, counting a marker in the error text:
+    #
+    #             console   transcript
+    #   as it is  visible       2
+    #   filtered  NOTHING       1
+    #
+    # The raise-time transcript entry comes with no console rendering, so
+    # dropping the displayed copy would make every error invisible to whoever is
+    # watching -- silently, and only noticed the next time somebody needed to see
+    # one. Two lines in a log is the cheaper problem.
+
+    BeforeEach {
+        $script:logDir = Join-Path $TestDrive ([guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $script:logDir -Force
+        $script:runStamp = 'err'
+        $script:isAdmin = $true
+        $script:Results = [System.Collections.Generic.List[object]]::new()
+        $script:TagFilter = @()
+        $script:ExcludeTagFilter = @()
+    }
+
+    It 'does not filter error records out of what it displays' {
+        $source = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Invoke-Step.ps1') -Raw
+
+        $source | Should-NotMatchString 'isnot \[System\.Management\.Automation\.ErrorRecord\]'
+    }
+
+    It 'writes the error text to the step log, which is the single-copy record' {
+        Invoke-Step -Name 'noisy' -Action { Write-Error 'SINGLECOPYMARKER' } 6>$null
+
+        $log = Get-Content (Join-Path $script:logDir 'noisy-err.log') -Raw
+        ([regex]::Matches($log, 'SINGLECOPYMARKER')).Count | Should-Be 1
+    }
+
+    It 'counts the error once, whatever the transcript shows' {
+        Invoke-Step -Name 'counted' -Action { Write-Error 'x' } 6>$null
+
+        $script:Results[0].Status | Should-Be 'Warning'
+    }
+}
