@@ -889,15 +889,17 @@
             # "TerminatingError(Find-PackageProvider)" in the middle of a step
             # that went on to report the right thing.
             #
-            # Test-PendingReboot carries the same lesson about Get-ItemProperty.
+            # Test-PendingReboot uses SilentlyContinue with Get-ItemProperty
+            # for the same reason.
             $newest = $null
             try {
                 $candidates = @(Find-PackageProvider -Name NuGet -ErrorAction SilentlyContinue |
                     Sort-Object Version -Descending)
                 if ($candidates.Count) { $newest = $candidates[0].Version }
             } catch {
-                # A backstop for a hard failure. The ordinary answer no longer
-                # throws, which is the point.
+                # A backstop. With SilentlyContinue the absent-provider case
+                # returns nothing instead of throwing, so reaching here means a
+                # hard failure.
                 Write-Verbose "Asking for the newest NuGet provider failed outright: $($_.Exception.Message)"
             }
 

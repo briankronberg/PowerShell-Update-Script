@@ -4,19 +4,16 @@ function Get-ElevationPolicyNote {
         Explains, from policy, why an elevation attempt was refused.
 
         .DESCRIPTION
-        Reporting rather than deciding, and deliberately so. Refusing a run over
-        these values would lock out the people most likely to be affected by
-        them: Test-AdministratorGroupMember already returns $null when a
-        filtered token hides the Administrators SID, and treating an unknown
-        answer plus a restrictive policy as "cannot elevate" would turn a real
-        administrator away. Nothing here changes what is attempted. It only
-        names what is set, once the attempt has already failed.
+        Reports. It decides nothing and changes nothing about what is
+        attempted, and names what is set only once an attempt has failed.
 
         "Elevation was declined or failed" is true and useless on a managed
-        machine. Naming the value that did it turns the same failure into
+        machine. Naming the value responsible turns the same failure into
         something someone can take to whoever manages the policy.
 
-        The registry values that explain a failure:
+        The registry values under
+        HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Policies\System that
+        explain a failure:
 
           ConsentPromptBehaviorUser = 0     a standard user's request is denied
                                             outright; no prompt is ever shown
@@ -24,17 +21,14 @@ function Get-ElevationPolicyNote {
                                             signature may elevate
           EnableLUA = 0                     there is no consent prompt to answer
 
-        A privilege-management broker is also named when one is running.
-        Nothing it does appears in the registry at all: it can deny an elevation,
-        or allow one application and refuse another, without leaving a value
-        behind. Without this, a refusal on such a machine produced no note --
-        which reads as "no policy is interfering" when one just did.
+        A running privilege-management broker is also named. Nothing a broker
+        does appears in the registry: it can deny an elevation, or allow one
+        application and refuse another, without leaving a value behind, so a
+        machine can refuse while every value above reads as permissive.
 
-        Recognising brokers by service name means keeping a list of vendors, and
-        that would be the wrong trade for a decision -- the next vendor would be
-        missed and a capable machine turned away. It is the right trade for an
-        explanation: a missing entry costs a sentence, and nothing is decided
-        either way.
+        Brokers are recognised by vendor name in the service list, so a vendor
+        absent from that list is not mentioned. Nothing is decided either way --
+        a missing entry costs a sentence of explanation.
 
         Returns nothing when nothing restrictive is found, so a caller can append
         the result and say nothing extra on an ordinary machine.
@@ -73,8 +67,7 @@ function Get-ElevationPolicyNote {
     }
 
     # Vendor-identifying names rather than a bare "privilege", which matches
-    # unrelated services and would send someone to their IT department over
-    # nothing.
+    # unrelated services.
     $brokerPatterns = @(
         '*defendpoint*', '*avecto*', '*beyondtrust*', '*privilege management*',
         '*adminbyrequest*', '*admin by request*', '*cyberark*',

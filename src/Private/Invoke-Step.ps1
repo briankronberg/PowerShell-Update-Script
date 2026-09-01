@@ -60,8 +60,8 @@
     Write-StepLog -Path $stepLog -Message "STARTING $Name"
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
 
-    # Function-local, so the caller's session is untouched -- which is the point
-    # of the rule against setting this in a module, and is not what this does.
+    # Function-local: the assignment is scoped to this function, so the caller's
+    # own preference is untouched once it returns.
     #
     # A caller that prefers Stop makes a native command's stderr terminating, and
     # most of these steps drive tools that write to stderr as a matter of course:
