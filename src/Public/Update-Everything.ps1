@@ -329,6 +329,11 @@
         # script raises a UAC prompt a standard user can never satisfy, and reports
         # the refusal as though the user had declined it.
         $elevation = Test-ElevationCapability
+
+        # Said before the attempt, so that a prompt which is then refused reads
+        # as the thing that was warned about rather than as a surprise.
+        if ($elevation.Caution) { Write-Warning $elevation.Caution }
+
         if (-not $elevation.CanElevate) {
             Write-Warning "Cannot run elevated: $($elevation.Reason)"
             Write-Warning 'Nothing has been changed. Re-run with -SkipElevation to run the steps that do not need administrator rights.'
