@@ -291,3 +291,17 @@ if ($failed.Count -gt 0) {
     [System.Text.UTF8Encoding]::new($false))
 
 Stop-Transcript | Out-Null
+
+# Shut the sandbox down from inside, which is the only clean way to close one.
+#
+# The host cannot: the session processes have no main window to close, so
+# CloseMainWindow does nothing and Stop-Process -Force is what is left. Forcing
+# skips the shutdown and vmmemWindowsSandbox then holds the virtual machine's
+# memory for as long as it likes -- measured at 26 minutes here -- which blocks
+# the next run.
+#
+# Everything above is already written to the mapped folder, which is host disk,
+# and the transcript is stopped. The delay is for the writes to land, not for
+# anything still to happen.
+Start-Sleep -Seconds 3
+Start-Process -FilePath 'shutdown.exe' -ArgumentList '/s', '/t', '0' -WindowStyle Hidden

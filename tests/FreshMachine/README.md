@@ -86,6 +86,28 @@ The harness leaves `EnableLUA` at `1` and sets `ConsentPromptBehaviorAdmin` to
 passes, and the child starts with nobody at the keyboard. This happens inside
 the sandbox and is discarded with it; the host is untouched.
 
+## One at a time, with a gap
+
+Windows runs one sandbox at a time, and starting a second does nothing at all —
+no window, no error, no clue. The launcher refuses to start when one is already
+open, and `-CloseExistingSandbox` closes it first.
+
+Closing is not the end of it. `vmmemWindowsSandbox` holds the virtual machine's
+memory and the hypervisor reclaims it on its own schedule, over a minute or more
+after the session processes are gone. **A sandbox started during that window
+starts and then never runs its logon command** — processes appear, nothing is
+written to the mapped folder, and the run waits out its whole timeout reporting a
+failure that belongs to the timing.
+
+Measured here: two runs 2m31s apart. The first passed. The second left
+`WindowsSandboxServer` and `WindowsSandboxRemoteSession` alive for twenty-five
+minutes without writing `logon.txt`.
+
+So the launcher waits for `vmmemWindowsSandbox` to go before it starts, up to
+three minutes, and says why if it does not. It waits on that name and never on a
+bare `vmmem`, which belongs to WSL on any machine that has it and would never
+clear.
+
 ## Prerequisites
 
 Checked before anything is created, each with what to do about it:

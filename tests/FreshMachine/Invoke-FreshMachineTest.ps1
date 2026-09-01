@@ -91,8 +91,46 @@ function Close-Sandbox {
     $running = @(Get-Process -Name $script:SandboxProcessNames -ErrorAction SilentlyContinue)
     if ($running.Count -eq 0) { return }
 
-    $running | Stop-Process -Force -ErrorAction SilentlyContinue
+    Stop-SandboxProcess -Process $running
     Write-Host 'Sandbox closed.' -ForegroundColor DarkGray
+}
+
+function Stop-SandboxProcess {
+    <#
+        Waits for the sandbox to finish shutting itself down, and forces it
+        only if it does not.
+
+        The harness shuts the guest down when it has written its results, which
+        is the only clean way to close a sandbox: the host's session processes
+        have no main window, so there is nothing to ask politely from out here.
+
+        Forcing skips the shutdown, and vmmemWindowsSandbox then holds the
+        virtual machine's memory for as long as it likes -- measured at 26
+        minutes and 807MB on this machine, with no session process left to
+        explain it. The next run either waits for that or starts into it and
+        hangs, which is how this harness spent an evening failing for reasons
+        that had nothing to do with the module.
+    #>
+    param([Parameter(Mandatory)][object[]] $Process)
+
+    # No CloseMainWindow: these processes have no main window, so it does nothing
+    # and reports nothing. The sandbox shuts itself down instead, from inside, at
+    # the end of Start-Harness.ps1 -- which is the only clean way to close one and
+    # the only way its memory is released promptly. This waits for that to finish.
+    #
+    # A guest shutdown takes longer than it looks: the session processes on the
+    # host outlive it by a while. 60s was not enough and reported forcing on runs
+    # that had shut down cleanly.
+    $deadline = (Get-Date).AddSeconds(150)
+    while ((Get-Date) -lt $deadline) {
+        if (-not @(Get-Process -Name $script:SandboxProcessNames -ErrorAction SilentlyContinue).Count) { return }
+        Start-Sleep -Seconds 2
+    }
+
+    Write-Host '  the sandbox has not finished shutting down; forcing it.' -ForegroundColor DarkYellow
+    Write-Host '  the next run may have to wait for its memory to be released.' -ForegroundColor DarkYellow
+    Get-Process -Name $script:SandboxProcessNames -ErrorAction SilentlyContinue |
+        Stop-Process -Force -ErrorAction SilentlyContinue
 }
 
 $repoRoot   = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -146,8 +184,7 @@ $alreadyRunning = @(Get-Process -Name $script:SandboxProcessNames -ErrorAction S
 if ($alreadyRunning.Count -gt 0) {
     if ($CloseExistingSandbox) {
         Write-Host '  closing the sandbox that is already open...' -ForegroundColor DarkGray
-        $alreadyRunning | Stop-Process -Force -ErrorAction SilentlyContinue
-        Start-Sleep -Seconds 5
+        Stop-SandboxProcess -Process $alreadyRunning
         $stillThere = @(Get-Process -Name $script:SandboxProcessNames -ErrorAction SilentlyContinue)
         if ($stillThere.Count -gt 0) {
             $problems.Add('A Windows Sandbox is still running after being asked to close.')
@@ -156,6 +193,42 @@ if ($alreadyRunning.Count -gt 0) {
         $problems.Add(
             'A Windows Sandbox is already running, and Windows allows only one. ' +
             'Close it and try again, or pass -CloseExistingSandbox.')
+    }
+}
+
+# Then wait for the previous sandbox's memory to be released.
+#
+# The session processes going away is not the end of a sandbox.
+# vmmemWindowsSandbox holds the virtual machine's memory and the hypervisor
+# reclaims it on its own schedule, over a minute or more. Start a new sandbox
+# while that is still happening and it starts -- processes appear, no error --
+# and then never runs its logon command, so the run waits out its whole timeout
+# and reports a failure that belongs to the timing rather than to the module.
+#
+# Measured: two runs on one machine, 2m31s apart. The first passed. The second
+# left WindowsSandboxServer and WindowsSandboxRemoteSession alive for 25 minutes
+# with no logon breadcrumb written.
+#
+# vmmemWindowsSandbox by name, and never a bare vmmem: that one belongs to WSL
+# on any machine that has it, and waiting for it would wait forever.
+if (-not $problems.Count) {
+    $settleDeadline = (Get-Date).AddSeconds(180)
+    $announced = $false
+
+    while (@(Get-Process -Name 'vmmemWindowsSandbox' -ErrorAction SilentlyContinue).Count -gt 0) {
+        if ((Get-Date) -ge $settleDeadline) {
+            $problems.Add(
+                'A previous Windows Sandbox is still releasing its memory (vmmemWindowsSandbox) ' +
+                'after 3 minutes. Starting now would produce a sandbox that never runs its logon ' +
+                'command. Wait for it to finish, or reboot.')
+            break
+        }
+
+        if (-not $announced) {
+            Write-Host '  waiting for the previous sandbox to release its memory...' -ForegroundColor DarkGray
+            $announced = $true
+        }
+        Start-Sleep -Seconds 5
     }
 }
 
