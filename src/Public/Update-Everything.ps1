@@ -12,9 +12,10 @@
 
         Steps cover winget and the Microsoft Store, Windows Update through
         PSWindowsUpdate, Microsoft 365 Apps, Defender signatures, PowerShell
-        modules and help, Chocolatey, Scoop, Python, uv, pip, pipx, npm, rustup,
-        dotnet, GitHub CLI extensions, the WSL kernel, PowerShell 7 itself and
-        the Windows Terminal default profile. The README lists what each runs.
+        modules and help, Chocolatey, Scoop, Python, uv, pip, pipx, npm, Deno,
+        Bun, pnpm, rustup, cargo binaries, Go binaries, dotnet, GitHub CLI
+        extensions, the WSL kernel, PowerShell 7 itself and the Windows Terminal
+        default profile. The README lists what each runs.
 
         Presence of an executable is not proof a feature is installed, and package
         managers routinely return non-zero for "nothing to do", so steps that
@@ -156,7 +157,7 @@
         every step.
 
         A step carries one or more of: Windows, Microsoft, PowerShell,
-        PackageManager, Python, Node, DotNet, Rust, Git, Self, Inventory.
+        PackageManager, Python, Node, DotNet, Rust, Go, Git, Self, Inventory.
 
             Update-Everything -Tag Python
             Update-Everything -Tag Inventory    report what is installed, update nothing
@@ -239,9 +240,9 @@
         [switch] $Notify,
         [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Git', 'Self', 'Inventory')]
         [string[]] $Tag = @(),
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Git', 'Self', 'Inventory')]
         [string[]] $ExcludeTag = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30,
@@ -1135,6 +1136,70 @@
         }
     }
 
+    # The three below follow the uv rule: self-update only what nothing else
+    # manages, and treat the tool's own refusal as correct rather than failed.
+    Invoke-Step -Name 'Deno' -RequiresCommand 'deno' -Tag 'Node' -Action {
+        $owner = Get-ToolInstallSource -Name 'deno'
+        if ($owner -notin 'Standalone', 'Unknown') {
+            Stop-StepAsSkipped -Reason "Deno is managed by $owner, which updates it in its own step"
+        }
+
+        $output = deno upgrade 2>&1
+        $output
+
+        if ($LASTEXITCODE -ne 0) {
+            if (($output | Out-String) -match 'package manager') {
+                Write-Output 'Deno declined to upgrade because something else manages it.'
+                $global:LASTEXITCODE = 0
+            } else {
+                Write-Error "deno upgrade failed with exit code $LASTEXITCODE. Deno's own message is in this step's log."
+                $global:LASTEXITCODE = 0
+            }
+        }
+    }
+
+    Invoke-Step -Name 'Bun' -RequiresCommand 'bun' -Tag 'Node' -Action {
+        $owner = Get-ToolInstallSource -Name 'bun'
+        if ($owner -notin 'Standalone', 'Unknown') {
+            Stop-StepAsSkipped -Reason "Bun is managed by $owner, which updates it in its own step"
+        }
+
+        $output = bun upgrade 2>&1
+        $output
+
+        if ($LASTEXITCODE -ne 0) {
+            if (($output | Out-String) -match 'package manager') {
+                Write-Output 'Bun declined to upgrade because something else manages it.'
+                $global:LASTEXITCODE = 0
+            } else {
+                Write-Error "bun upgrade failed with exit code $LASTEXITCODE. Bun's own message is in this step's log."
+                $global:LASTEXITCODE = 0
+            }
+        }
+    }
+
+    Invoke-Step -Name 'pnpm' -RequiresCommand 'pnpm' -Tag 'Node' -Action {
+        $owner = Get-ToolInstallSource -Name 'pnpm'
+        if ($owner -notin 'Standalone', 'Unknown') {
+            Stop-StepAsSkipped -Reason "pnpm is managed by $owner, which updates it in its own step"
+        }
+
+        # self-update applies to the standalone install only; a Corepack-managed
+        # pnpm is pinned per project and updated through Corepack.
+        $output = pnpm self-update 2>&1
+        $output
+
+        if ($LASTEXITCODE -ne 0) {
+            if (($output | Out-String) -match 'corepack|standalone') {
+                Write-Output 'pnpm declined to self-update because Corepack or a package manager manages it.'
+                $global:LASTEXITCODE = 0
+            } else {
+                Write-Error "pnpm self-update failed with exit code $LASTEXITCODE. pnpm's own message is in this step's log."
+                $global:LASTEXITCODE = 0
+            }
+        }
+    }
+
     # ---------------------------------------------------------------------------
     # 6. .NET global tools
     # ---------------------------------------------------------------------------
@@ -1205,6 +1270,39 @@
     # ---------------------------------------------------------------------------
     Invoke-Step -Name 'rustup' -RequiresCommand 'rustup' -Tag 'Rust' -Action {
         rustup update
+    }
+
+    # rustup moves the toolchains; nothing moves the binaries cargo install put
+    # on the machine. The cargo-update crate adds the subcommand that does.
+    Invoke-Step -Name 'cargo binaries' -RequiresCommand 'cargo' -Tag 'Rust' -Action {
+        $null = cargo install-update --version 2>&1
+        if ($LASTEXITCODE -ne 0) {
+            $global:LASTEXITCODE = 0
+            Stop-StepAsSkipped -Reason 'the cargo-update crate is not installed; "cargo install cargo-update" adds the subcommand this step runs'
+        }
+
+        # cargo writes progress to stderr as a matter of course; judge by exit code.
+        $output = cargo install-update --all 2>&1
+        $output
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "cargo install-update --all failed with exit code $LASTEXITCODE. cargo's own message is in this step's log."
+            $global:LASTEXITCODE = 0
+        }
+    }
+
+    # go install has no update-everything form; gup is the tool that adds one,
+    # updating every binary under GOBIN.
+    Invoke-Step -Name 'Go binaries' -RequiresCommand 'go' -Tag 'Go' -Action {
+        if (-not (Get-Command gup -CommandType Application -ErrorAction SilentlyContinue)) {
+            Stop-StepAsSkipped -Reason 'gup is not installed; "go install github.com/nao1215/gup@latest" adds it'
+        }
+
+        $output = gup update 2>&1
+        $output
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "gup update failed with exit code $LASTEXITCODE. gup's own message is in this step's log."
+            $global:LASTEXITCODE = 0
+        }
     }
 
     Invoke-Step -Name 'GitHub CLI extensions' -RequiresCommand 'gh' -Tag 'Git' -Action {

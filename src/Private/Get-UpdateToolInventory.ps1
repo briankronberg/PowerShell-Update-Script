@@ -48,6 +48,9 @@ function Get-UpdateToolInventory {
             @{ Name = 'PowerShell 7';    Command = 'pwsh';    VersionArgument = '--version' }
             @{ Name = 'Node.js';         Command = 'node';    VersionArgument = '--version' }
             @{ Name = 'npm';             Command = 'npm';     VersionArgument = '--version' }
+            @{ Name = 'Deno';            Command = 'deno';    VersionArgument = '--version' }
+            @{ Name = 'Bun';             Command = 'bun';     VersionArgument = '--version' }
+            @{ Name = 'pnpm';            Command = 'pnpm';    VersionArgument = '--version' }
             @{ Name = 'Python launcher'; Command = 'py';      VersionArgument = '--version' }
             @{ Name = 'Python manager';  Command = 'pymanager'; VersionArgument = '--version' }
             @{ Name = 'uv';              Command = 'uv';      VersionArgument = '--version' }
@@ -55,6 +58,9 @@ function Get-UpdateToolInventory {
             @{ Name = 'pipx';            Command = 'pipx';    VersionArgument = '--version' }
             @{ Name = '.NET SDK';        Command = 'dotnet';  VersionArgument = '--version' }
             @{ Name = 'rustup';          Command = 'rustup';  VersionArgument = '--version' }
+            @{ Name = 'cargo-update';    Command = 'cargo-install-update'; VersionArgument = '--version' }
+            @{ Name = 'Go';              Command = 'go';      VersionArgument = 'version' }
+            @{ Name = 'gup';             Command = 'gup';     VersionArgument = 'version' }
             @{ Name = 'GitHub CLI';      Command = 'gh';      VersionArgument = '--version' }
             @{ Name = 'WSL';             Command = 'wsl';     VersionArgument = $null }
         )

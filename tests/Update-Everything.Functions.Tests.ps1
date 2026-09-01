@@ -1663,9 +1663,19 @@ Describe 'Every step declares a tag' -Tag 'Static' {
             if ($name) { $script:StepTags[$name] = $tags }
         }
 
-        # The set both public entry points validate against.
-        $script:DeclaredTags = @('Windows', 'Microsoft', 'PowerShell', 'PackageManager',
-                                 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')
+        # Read from the parameter itself rather than kept as a copy, which had
+        # already drifted once by the time a new tag landed.
+        $script:DeclaredTags = @((Get-Command Update-Everything).Parameters['Tag'].Attributes |
+            Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } |
+            ForEach-Object { $_.ValidValues })
+    }
+
+    It 'validates the same tag set on both entry points' {
+        $register = @((Get-Command Register-UpdateEverythingTask).Parameters['Tag'].Attributes |
+            Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } |
+            ForEach-Object { $_.ValidValues })
+
+        $register | Should-BeCollection $script:DeclaredTags
     }
 
     It 'found the steps to check' {
