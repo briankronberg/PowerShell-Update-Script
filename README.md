@@ -270,6 +270,26 @@ Update-Everything -Tag Python
 Update-Everything -ExcludeTag Python
 ```
 
+Every run opens by naming the version that produced it, so a transcript can be
+read against the code that made it:
+
+```
+Maintenance run started 09/01/2026 08:14  |  Admin: True  |  Main Log: ...
+UpdateEverything 1.2.0
+```
+
+The Inventory step then compares that against the gallery:
+
+```
+UpdateEverything 1.2.0 is running, which is the newest published version.
+```
+
+The comparison lives there rather than in the banner because it costs a network
+call, and `-ExcludeTag Inventory` turns it off for a scheduled run that does not
+want one. A gallery it could not reach says so rather than claiming currency, and
+a copy installed from GitHub — which is often *ahead* of the gallery — is never
+called out of date.
+
 `-Tag Inventory` reports what the machine has and updates nothing, which is the
 quickest way to see why a run skipped what it skipped:
 
