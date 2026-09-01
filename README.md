@@ -41,7 +41,7 @@ into your own module path. No elevation, and it prints what it exported. Add
 `-Force` is in the command because the module installs into a folder named for
 its version, and the installer refuses to overwrite one that is already there.
 The version does not change with every commit, so a second install from `main`
-is an overwrite of `1.0.0` by `1.0.0` and stops without it. On a first install
+is an overwrite of a version by the same version, and stops without it. On a first install
 it does nothing; on every one after, it is what makes the line safe to paste
 again. Nothing is lost if it is interrupted: the installer stages the new copy
 and validates it before it replaces the old one.
