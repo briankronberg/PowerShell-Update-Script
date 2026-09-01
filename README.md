@@ -49,9 +49,10 @@ it does nothing; on every one after, it is what makes the line safe to paste
 again. Nothing is lost if it is interrupted: the installer stages the new copy
 and validates it before it replaces the old one.
 
-`Update-Everything -UpdateSelf -UpdateSelfSource Main` does the same thing from
-inside a run. The default source is `Gallery`, which is right for most people
-and wrong for anyone tracking a patch.
+`Update-Everything -UpdateSelf -UpdateSelfSource Main` does the same thing as
+a command: with `-UpdateSelf` the run updates this module and does nothing
+else. The default source is `Gallery`, which is right for most people and
+wrong for anyone tracking a patch.
 
 ### Why that command is shaped the way it is
 
@@ -258,7 +259,7 @@ thing that crosses a process boundary.
 | `-Tag` | *(all)* | Run only the steps carrying one of these tags. Everything else is reported as skipped. |
 | `-ExcludeTag` | *(none)* | Run everything except the steps carrying one of these tags. Exclusion wins when both are given. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
-| `-UpdateSelf` | off | Update this module before anything else. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. |
+| `-UpdateSelf` | off | Update this module and run nothing else — a shortcut for `Install-Module UpdateEverything -Force`. Skips elevation, and `-Tag`/`-ExcludeTag` are ignored. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. |
 | `-UpdateSelfSource` | `Gallery` | Where `-UpdateSelf` gets it from. `Gallery` is the newest published release; `Main` is the development head, fetched from GitHub. |
 
 ## Selecting steps

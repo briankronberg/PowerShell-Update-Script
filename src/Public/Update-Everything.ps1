@@ -139,13 +139,15 @@
         warning has scrolled well out of sight.
 
     .PARAMETER UpdateSelf
-        Update this module before doing anything else. Default: $false.
-        -UpdateSelfSource decides where from, and defaults to the gallery.
+        Update this module, and run nothing else: a shortcut for Install-Module
+        UpdateEverything -Force, or for the Main installer with
+        -UpdateSelfSource Main. Default: $false. -Tag and -ExcludeTag are
+        ignored for the run, and elevation is never requested, because a
+        CurrentUser install needs none.
 
-        It takes effect on the *next* run either way. Unlike winget, which is a
-        fresh process every step, this module is already loaded by the time the
-        step runs: the files on disk are replaced, and the functions executing
-        now stay on the code already in memory.
+        The new version takes effect on the *next* run. This module is already
+        loaded by the time the step runs: the files on disk are replaced, and
+        the functions executing now stay on the code already in memory.
 
         Off by default. From Main it fetches and runs an installer from a
         branch, which is a supply-chain decision rather than a routine update,
@@ -293,6 +295,19 @@
         $transcriptRunning = $true
     } catch {
         Write-Warning "Transcript unavailable ($($_.Exception.Message)); per-step logs are unaffected."
+    }
+
+    # -UpdateSelf is a shortcut: update this module and run nothing else. The
+    # self step needs no elevation -- the gallery path is Install-Module -Scope
+    # CurrentUser and the Main installer writes to the user's modules -- so the
+    # run skips the UAC prompt and narrows the tag filter to Self.
+    if ($UpdateSelf) {
+        if ($Tag.Count -or $ExcludeTag.Count) {
+            Write-Warning '-UpdateSelf updates only this module; -Tag and -ExcludeTag are ignored for this run.'
+        }
+        $Tag = @('Self')
+        $ExcludeTag = @()
+        $SkipElevation = $true
     }
 
     $script:isAdmin = Test-IsAdministrator
