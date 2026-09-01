@@ -12,12 +12,16 @@ function Get-WingetLeftover {
                       often fixable -- a package whose executable is running
                       cannot be replaced until it is closed.
 
-          Skipped     winget listed it and never tried. Usually "a newer package
-                      version is available in a configured source, but it does
-                      not apply to your system or requirements", which is
-                      permanent until the vendor ships something that applies.
-                      Reporting it as a failure every run teaches people to skim
-                      past it.
+          Skipped     winget listed it and never tried. winget's usual wording:
+                      "a newer package version is available in a configured
+                      source, but it does not apply to your system or
+                      requirements". That is permanent until the vendor ships
+                      something that applies, and reporting it as a failure
+                      every run teaches people to skim past the ones that are
+                      real failures.
+
+          A package only the closing table lists was listed for the first time
+          during the run and is neither of these; Listed tells it apart.
 
         Attempted is decided by winget's own "Found <name> [<id>]" line. The rest
         of the output is localised prose.
@@ -87,6 +91,7 @@ function Get-WingetLeftover {
             Version   = $package.Version
             Available = $package.Available
             Attempted = $attempted
+            Listed    = $wasListed
             Reason    = $reason
         }
     }

@@ -17,6 +17,9 @@
         The patterns are narrow -- a bar, a bare percentage, a spinner tick --
         because this runs over every line of every step, and dropping real
         output to tidy a log would be the worse bug.
+
+        .PARAMETER Line
+        One line of captured step output.
     #>
     [CmdletBinding()]
     [OutputType([bool])]

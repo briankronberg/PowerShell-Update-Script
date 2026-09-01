@@ -11,13 +11,15 @@ function Format-SelfVersionStatus {
 
         Three answers that must not be confused:
 
-          behind          the gallery is ahead, and -UpdateSelf will fetch it
+          behind          the gallery is ahead; -UpdateSelf fetches a gallery
+                          copy, and for one it cannot move it names the switch
+                          that will
           ahead / equal   nothing to do
           cannot tell     the gallery was not reachable
 
-        A copy PowerShellGet did not install is frequently ahead of the gallery
-        rather than behind, so it is named separately and never called out of
-        date.
+        A copy PowerShellGet did not install is named separately, with the
+        switch that matches where it came from. When it is ahead of the gallery
+        -- the usual state for one -- it is not called out of date.
 
         .PARAMETER Running
         The version of the module actually executing.

@@ -681,9 +681,9 @@ Describe 'Every cadence can actually register a task' -Tag 'Integration' {
     }
 
     # PatchTuesday is registered once here and asserted twice, rather than once
-    # per test. Registering costs 3.7s and removing costs 2.9s against the real
-    # Task Scheduler, and the second registration would produce the same task as
-    # the first.
+    # per test. Registering and removing real tasks costs seconds each against
+    # the Task Scheduler, and the second registration would produce the same
+    # task as the first.
     #
     # The parent AfterEach still runs between these two, so the export is taken
     # in BeforeAll while the task exists.

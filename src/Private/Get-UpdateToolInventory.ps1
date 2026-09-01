@@ -62,10 +62,12 @@ function Get-UpdateToolInventory {
 
     foreach ($tool in $Catalogue) {
         $resolved = @(Get-Command $tool.Command -CommandType Application -ErrorAction SilentlyContinue)
+        # First-occurrence order is PATH-resolution order, so the first entry is
+        # the copy that actually runs.
         $places = @($resolved |
             ForEach-Object { Split-Path $_.Source -Parent } |
             Where-Object { $_ } |
-            Sort-Object -Unique)
+            Select-Object -Unique)
 
         if (-not $resolved.Count) {
             [pscustomobject]@{
