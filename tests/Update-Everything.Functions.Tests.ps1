@@ -2487,6 +2487,14 @@ remove: Access is denied.: "C:\...\WinGet\Packages\astral-sh.uv_...\uv.exe"
         $uv.Version   | Should-Be '0.11.19'
         $uv.Available | Should-Be '0.12.7'
     }
+
+    It 'tells a newly listed package apart from a skipped one' {
+        $extra = [pscustomobject]@{ Name = 'New App'; Id = 'New.New'; Version = '1.0'; Available = '1.1' }
+        $rows = @(Get-WingetLeftover -Before $script:Before -After (@($script:Before) + $extra) -Output $script:Output)
+
+        @($rows | Where-Object { $_.Id -eq 'New.New' }).Listed | Should-BeFalse
+        @($rows | Where-Object { $_.Id -eq 'Cisco.CiscoWebexMeetings' }).Listed | Should-BeTrue
+    }
 }
 
 Describe 'Errors reach the person watching the run' -Tag 'Unit' {

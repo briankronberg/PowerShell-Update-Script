@@ -394,16 +394,15 @@ there is one source of truth about whether the code passes.
 
 ### Where the time goes
 
-The full suite takes about 90 seconds, and two costs account for half of it.
-Neither is a defect and neither is worth optimising:
+Two costs dominate the suite, and neither is a defect nor worth optimising:
 
 | Cost | What it is |
 |---|---|
-| ~19s | The **first** `Invoke-ScriptAnalyzer` call in a process. Loading the rule assemblies is the entire expense: every call after it is milliseconds, and the remaining files together take under a second. Batching the calls does not help, because the number of calls is not what costs. |
-| ~25s | Four `Integration` tests, registering three real scheduled tasks. Registering one costs 3.7s and removing it 2.9s against the real Task Scheduler, and there is nothing between the test and that price. |
+| The first `Invoke-ScriptAnalyzer` call in a process | Loading the rule assemblies is the entire expense, tens of seconds; every call after it is milliseconds. Batching the calls does not help, because the number of calls is not what costs. Every analyzer pass carries the `Lint` tag, including the gallery-readiness test. |
+| The `Integration` tests | They register and remove real scheduled tasks, seconds per task against the real Task Scheduler, and there is nothing between the test and that price. |
 
-The rest of the suite -- 644 of the 720 tests -- runs in 59 seconds. While
-iterating, skip both:
+While iterating, skip both; the rest of the suite finishes in well under a
+minute:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -ExcludeTag Lint,Integration

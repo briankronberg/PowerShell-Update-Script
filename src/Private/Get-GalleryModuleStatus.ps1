@@ -7,20 +7,26 @@ function Get-GalleryModuleStatus {
         .DESCRIPTION
         Returns Name, Installed, Available, Updatable and NeedsUpdate.
 
-        Installed is $null when the module is absent, which is an install and
-        needs consent, rather than an update, which does not.
+        Installed is $null when the module is absent. Absent means any install
+        is a new install and needs consent; present but old means an update,
+        which does not.
 
-        Available is $null when the gallery could not be reached, and NeedsUpdate
-        is then $false, so a network failure presents as "cannot tell" rather
-        than as a reason to reinstall. An update is never reported for a module
-        that is not installed.
+        Available is $null when the gallery could not be reached or does not
+        carry the name, and NeedsUpdate is then $false, so neither presents as
+        a reason to reinstall. An update is never reported for a module that is
+        not installed.
 
         Updatable reports whether Update-Module can move this copy forward. It
-        refuses anything it did not install, which covers every module that
-        shipped with the host. Windows PowerShell ships PowerShellGet 1.0.0.1
+        refuses anything it did not install, answering "Module 'X' was not
+        installed by using Install-Module, so it cannot be updated" -- which
+        covers every module that shipped with the host. Windows PowerShell
+        ships PowerShellGet 1.0.0.1
         under Program Files rather than $PSHOME, so the path is not the test;
         whether PowerShellGet recorded the install is. Moving a shipped copy
         forward is a side-by-side install, and so an install decision.
+
+        .PARAMETER Name
+        The module to look up, on this machine and on the gallery.
 
         .EXAMPLE
         Get-GalleryModuleStatus -Name PowerShellGet

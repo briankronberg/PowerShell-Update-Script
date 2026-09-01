@@ -634,6 +634,13 @@ Describe 'Update-Everything' -Tag 'Static' {
 
 Describe 'Repository documentation' -Tag 'Docs' {
 
+    It 'shows an inventory sample sized to the real catalogue' {
+        $readme = Get-Content (Join-Path $script:RepoRoot 'README.md') -Raw
+        $readme -match 'of (\d+) tools present' | Should-BeTrue
+        [int]$Matches[1] |
+            Should-Be @(& (Get-Module UpdateEverything) { Get-UpdateToolInventory }).Count
+    }
+
     It 'README documents -<Name>' -ForEach $ExpectedParameters {
         $script:Readme | Should-MatchString ([regex]::Escape("-$Name"))
     }
@@ -1158,7 +1165,7 @@ Describe 'Get-ToolInstallSource' -Tag 'Unit' {
     }
 }
 
-Describe 'Ready for the PowerShell Gallery' -Tag 'Static','Module' {
+Describe 'Ready for the PowerShell Gallery' -Tag 'Static','Module','Lint' {
 
     # The gallery runs PSScriptAnalyzer with its own default rules and shows the
     # result on the package page. This repository's settings suppress several

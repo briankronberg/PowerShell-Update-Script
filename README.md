@@ -328,7 +328,7 @@ on the one that keeps everything else current:
 
 ```powershell
 Register-UpdateEverythingTask -ExcludeTag Python -Cadence Daily
-Register-UpdateEverythingTask -Tag Python -Cadence Monthly
+Register-UpdateEverythingTask -Tag Python -Cadence PatchTuesday
 ```
 
 ## What it updates
@@ -362,8 +362,9 @@ The distinction matters. The first is worth doing something about; the second
 will not change until the vendor ships a package that applies, and reporting it
 as a failure on every run is how people learn to skim past the ones that are.
 
-**The step is only marked `Warning` for packages winget actually attempted.** One
-it declined is not a fault of the run and does not colour it.
+**The step is marked `Warning` only when something may really have failed** — a
+package winget attempted, or a non-zero exit it could not attribute to one. A
+package it declined is not a fault of the run and does not colour it.
 
 ### Products updated by name
 
@@ -373,7 +374,7 @@ it declined is not a fault of the run and does not colour it.
 | Microsoft 365 Apps, meaning Word, Excel, Outlook, PowerPoint, Teams and OneNote | `OfficeC2RClient.exe /update user`, the same action as the Update Now button without the prompts. Click-to-run does the work in the background, so the step reports "requested" rather than "applied". |
 | Microsoft Store apps | The `msstore` source, covered by `winget upgrade --all`. |
 | Microsoft Defender antivirus signatures | `Update-MpSignature`. It skips when a third-party antivirus has taken over, which it detects by asking `Get-MpComputerStatus` whether the antimalware service is on. Otherwise a managed machine would report a failed step every run. |
-| PowerShell 7 | winget, forced to the MSI package with `--installer-type wix`. It installs only with your consent and upgrades in place when it is already there. |
+| PowerShell 7 | winget. A fresh install is forced to the MSI with `--installer-type wix`, and only with your consent; an existing copy upgrades in place as whatever package it already is, so an MSIX copy stays MSIX and the step prints how to switch. |
 | PowerShell modules from the Gallery | `Update-PSResource -Name *` where PSResourceGet exists, otherwise `Update-Module`. |
 | PowerShell help | `Update-Help`, pinned to `en-US` under any other UI culture, where most modules publish no help at all. |
 | PowerShell Gallery tooling | `PowerShellGet`, `PSResourceGet` and the NuGet package provider, which every other gallery step runs on. A copy the host shipped cannot be updated in place, so moving it forward is a side-by-side install and asks first. |
@@ -394,14 +395,14 @@ choose the packages; the manager's own inventory does.
 
 | Manager | Found by | What runs | Covers |
 |---|---|---|---|
-| winget | `winget` on `PATH` | `winget source update`, then `winget upgrade --all --include-unknown --silent` | Desktop applications from the winget community repository and the Microsoft Store. The broadest step by far, covering browsers, editors, runtimes and drivers shipped as apps. |
+| winget | `winget` on `PATH` | `winget source update`, then `winget upgrade --all --include-unknown --silent --accept-source-agreements --accept-package-agreements --disable-interactivity` | Desktop applications from the winget community repository and the Microsoft Store. The broadest step by far, covering browsers, editors, runtimes and drivers shipped as apps. The `--accept-*` flags accept source and vendor licence agreements on your behalf. |
 | Chocolatey | `choco` | `choco upgrade all -y` | Everything installed as a Chocolatey package. Exit codes 1641 and 3010 pass, since those are the MSI "reboot required" codes rather than failures. |
 | Scoop | `scoop` | `scoop update`, `scoop update *`, `scoop cleanup *`, each run on its own | Scoop, its buckets, installed apps, then old versions. The phases run separately so a broken bucket cannot hide the rest. |
 | npm | `npm` | `npm install -g npm@latest`, then `npm update -g` only with `-UpdateGlobalNpm` | npm itself, every run. Global packages only on request, because upgrading them can move a pinned toolchain. |
 | pip | `py`, else `python` | `<interpreter> -m pip install --upgrade pip --disable-pip-version-check` | pip itself, for the first of those found. Where `py` is present that is the launcher's default interpreter, which is not always the `python` on `PATH`. Installed packages are left alone -- see [Python](#python). |
 | pipx | `pipx` | `pipx upgrade-all` | Every Python application pipx installed. |
 | uv | `uv`, plus an ownership check | `uv self update` | uv itself, and only when nothing else owns it. |
-| Python Install Manager | `pymanager`, else `py` | `pymanager install --update` | Installed Python runtimes. |
+| Python Install Manager | `pymanager`, else a `py` that answers `py help install` | `pymanager install --update`, or `py install --update` through the Install Manager's `py` alias | Installed Python runtimes. The classic `py` launcher cannot update runtimes, so a machine that has only it reports Skipped. |
 | .NET SDK | `dotnet`, plus an SDK version of 6 or higher | `dotnet tool update --all --global`, falling back to updating each tool by name | Global .NET tools. `dotnet` exists for runtime-only installs too, so the step confirms the SDK before using it. |
 | .NET workloads | `dotnet` | `dotnet workload update` | MAUI, Android, iOS and WASM workloads. |
 | rustup | `rustup` | `rustup update` | Every installed Rust toolchain. |
@@ -437,7 +438,7 @@ Four steps, and they cover different things:
 | Step | Updates |
 |---|---|
 | `Python (Install Manager)` | the Python runtimes |
-| `pip` | pip itself, for the interpreter on PATH |
+| `pip` | pip itself, for the first of `py`, `python` found |
 | `uv` | uv itself, and only when no package manager owns it |
 | `pipx packages` | isolated CLI applications |
 
@@ -451,9 +452,10 @@ both have their own steps.
 step reports skipped and says so: those packages belong to whatever project made
 the environment, not to the machine.
 
-Only the interpreter that resolves on PATH is updated. Others the launcher knows
-about are named in the output and left alone — upgrading pip in every Python on a
-machine is a larger claim than a maintenance run should make on its own.
+Only one interpreter's pip is updated: the launcher's default when `py` is
+present, else the `python` on `PATH`. Others the launcher knows about are named
+in the output and left alone — upgrading pip in every Python on a machine is a
+larger claim than a maintenance run should make on its own.
 
 pip is upgraded through `python -m pip`, never the bare `pip.exe`: on Windows pip
 cannot replace its own running executable, so the direct form fails on a locked
@@ -481,7 +483,9 @@ The module writes logs to the first writable location among `%USERPROFILE%`,
 `%LOCALAPPDATA%`, `%TEMP%` and the module directory, under `UpdateLogs\`:
 
 - `Update-Everything-<timestamp>.log`, the transcript of the whole run
-- `<step>-<timestamp>.log`, every stream from that one step
+- `<step>-<timestamp>.log`, every stream from that one step. Progress repaints
+  — bars, spinner ticks, bare percentages — are dropped, so a redrawing download
+  does not arrive as a column of noise
 
 Many CLIs write ordinary progress to stderr, so a step earns `Warning` only when
 PowerShell itself raises an error record.

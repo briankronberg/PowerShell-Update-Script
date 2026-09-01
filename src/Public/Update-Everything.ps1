@@ -17,8 +17,9 @@
         the Windows Terminal default profile. The README lists what each runs.
 
         Presence of an executable is not proof a feature is installed, and package
-        managers routinely return non-zero for "nothing to do", so every step
-        probes before it runs and enumerates its own acceptable exit codes. Steps
+        managers routinely return non-zero for "nothing to do", so steps that
+        drive an external tool probe for it first, and each step decides which
+        of its tool's exit codes are routine. Steps
         capture every stream (*>&1); only errors raised by PowerShell itself are
         counted, and those mark a step Warning rather than OK.
 
@@ -83,7 +84,9 @@
           All              approve everything below
           PowerShell7      install PowerShell 7 via winget (machine-wide MSI)
           PSWindowsUpdate  install the PSWindowsUpdate module (AllUsers scope)
-          NuGetProvider    install the NuGet package provider (CurrentUser)
+          NuGetProvider    install or refresh the NuGet package provider
+                           (the first bootstrap is CurrentUser; a refresh is
+                           AllUsers when elevated, otherwise CurrentUser)
           BurntToast       install the BurntToast module for -Notify (CurrentUser)
           PowerShellGet    replace the PowerShellGet 1.0.0.1 Windows ships with
                            2.x, which can accept module licenses and can see
@@ -206,8 +209,9 @@
 
     .NOTES
         Elevation is checked before it is requested. A standard user gets a clear
-        explanation and exit 64 rather than a UAC prompt that cannot succeed. Run
-        with -SkipElevation to perform the steps that do not need admin.
+        explanation and a result with Ran = $false rather than a UAC prompt that
+        cannot succeed. Run with -SkipElevation to perform the steps that do not
+        need admin.
 
         Execution policy: the elevated relaunch passes -ExecutionPolicy Bypass.
         Importing the module obeys whatever policy is in force, so on a machine
@@ -406,8 +410,7 @@
     $WingetNothingToDo = @(-1978335189, -1978335212)
 
     # The version that produced this log, so a transcript can be read against the
-    # code that made it. The running module, not the highest installed: a session
-    # imported by path, or loaded before an update, is running something else.
+    # code that made it. The running module, not the highest installed.
     $script:RunningVersion = $MyInvocation.MyCommand.Module.Version
 
     Write-Host "Maintenance run started $(Get-Date)  |  Admin: $isAdmin  |  Main Log: $mainLog" -ForegroundColor Green
@@ -426,8 +429,9 @@
         Write-Output "$($present.Count) of $($inventory.Count) tools present."
         Write-Output ''
 
-        # Aligned by hand: inside a step action the output has to reach the pipeline
-        # for Invoke-Step to capture, and Format-Table records only render to a host.
+        # Aligned by hand to control the widths: the step pipeline renders
+        # Format-Table records through Out-String -Stream, but with widths of its
+        # own choosing.
         $nameWidth = 0
         $ownerWidth = 0
         foreach ($tool in $present) {
@@ -444,16 +448,18 @@
             Write-Output 'Their steps report Skipped, which is the expected result rather than a fault.'
         }
 
-        # Compared against the gallery here rather than in the banner because it costs
-        # a network call, and -ExcludeTag Inventory turns it off.
+        # Compared against the gallery here rather than in the banner: it costs a
+        # network call a machine with no network should not pay before the run
+        # starts, and -ExcludeTag Inventory turns it off.
         if ($script:RunningVersion) {
             Write-Output ''
             Write-Output (Format-SelfVersionStatus -Running $script:RunningVersion `
                 -Status (Get-GalleryModuleStatus -Name 'UpdateEverything'))
         }
 
-        # More than one executable of a name on PATH means the first runs and the rest
-        # are updated by nobody, or by a manager that does not own the copy in use.
+        # More than one executable of a name on PATH means the first on PATH runs
+        # and the rest are updated by nobody, or by a manager that does not own
+        # the copy in use. Places preserves that resolution order.
         $duplicated = @($present | Where-Object { $_.Copies -gt 1 })
         if ($duplicated.Count) {
             Write-Output ''
@@ -570,7 +576,8 @@
             $leftover = @(Get-WingetLeftover -Before $before -After $after -Output $text)
 
             $attempted = @($leftover | Where-Object { $_.Attempted })
-            $skipped = @($leftover | Where-Object { -not $_.Attempted })
+            $skipped   = @($leftover | Where-Object { -not $_.Attempted -and $_.Listed })
+            $appeared  = @($leftover | Where-Object { -not $_.Attempted -and -not $_.Listed })
 
             if ($attempted.Count) {
                 Write-Output ''
@@ -581,12 +588,23 @@
             }
 
             # Information, not a problem: these do not change until the vendor ships
-            # something applicable, and reading them as failures teaches skimming.
+            # something applicable, and a person who reads them as failures learns
+            # to skim past the ones that are.
             if ($skipped.Count) {
                 Write-Output ''
                 Write-Output 'Not upgradable on this machine, and expected to stay that way:'
                 foreach ($package in $skipped) {
                     Write-Output ("  {0} {1} -> {2}  ({3})" -f $package.Id, $package.Version, $package.Available, $package.Reason)
+                }
+            }
+
+            # Listed for the first time by the closing table: nothing was tried
+            # and nothing is known to block it, so the next run picks it up.
+            if ($appeared.Count) {
+                Write-Output ''
+                Write-Output 'Newly listed during this run; the next run picks these up:'
+                foreach ($package in $appeared) {
+                    Write-Output ("  {0} {1} -> {2}" -f $package.Id, $package.Version, $package.Available)
                 }
             }
 
@@ -607,9 +625,10 @@
     }
 
     # ---------------------------------------------------------------------------
-    # A manager runs before the tools it may own. Chocolatey and Scoop install
-    # language toolchains, so updating uv or npm first would update a tool before
-    # the thing responsible for it.
+    # A manager runs before the tools it may own. The uv step asks
+    # Get-ToolInstallSource and skips a managed copy, so for it this order is
+    # presentation rather than protection -- but the sequence should read the
+    # way the dependency runs.
     # ---------------------------------------------------------------------------
     # 2b. Chocolatey and Scoop, before the toolchains they may own
     # ---------------------------------------------------------------------------
@@ -664,8 +683,9 @@
                 }
 
                 Write-Output 'PowerShell 7 not detected; installing the MSI package via winget...'
-                # --installer-type wix forces the MSI (winget 7.6+ defaults to MSIX) so it
-                # installs to C:\Program Files\PowerShell\7 where Terminal expects it.
+                # --installer-type wix forces the MSI (the Microsoft.PowerShell winget
+                # package defaults to MSIX from PowerShell 7.6) so it installs to
+                # C:\Program Files\PowerShell\7 where Terminal expects it.
                 winget install --id $id --exact --source winget --installer-type wix `
                     --accept-source-agreements --accept-package-agreements --disable-interactivity
                 if ($LASTEXITCODE -ne 0) { throw "winget install returned $LASTEXITCODE" }
@@ -726,8 +746,9 @@
     # ---------------------------------------------------------------------------
     # 3. PowerShell repository trust, modules + help
     # ---------------------------------------------------------------------------
-    # PSGallery ships Untrusted, so every module install stops on a confirmation
-    # prompt that -ErrorAction SilentlyContinue does not suppress. Trust is stored
+    # PSGallery ships Untrusted, so every module install or update stops on the
+    # "You are installing the modules from an untrusted repository" prompt, which
+    # -ErrorAction SilentlyContinue does not suppress. Trust is stored
     # per-user under LOCALAPPDATA, and UAC keeps the same profile, so setting it
     # once here covers both the elevated and non-elevated run.
     Invoke-Step -Name 'Trust PSGallery' -Tag 'PowerShell' -Action {
@@ -772,10 +793,10 @@
         # which handles the 1.0.0.1 Windows ships as one case of a general rule.
     }
 
-    # The tooling every other gallery step runs on. Bootstrapped above when missing,
-    # but nothing brought it forward once present, so a machine could carry a
-    # years-old provider for as long as it lived. Runs before PowerShell modules,
-    # which depends on it.
+    # The tooling every other gallery step runs on. Bootstrapping covers absence;
+    # this step is what brings a present copy forward, without which a machine
+    # could carry a years-old NuGet provider or a PowerShellGet 2.1 for as long
+    # as it lived. Runs before PowerShell modules, which depends on it.
     Invoke-Step -Name 'Gallery tooling' -Tag 'PowerShell' -Action {
         # Not admin-gated, and -Scope AllUsers fails without elevation, so the
         # scope follows what the run actually has.
@@ -784,8 +805,9 @@
         # --- NuGet package provider ------------------------------------------
         #
         # There is no Update-PackageProvider; Install-PackageProvider is the only way
-        # forward, so the refresh is an install command fetching a binary assembly and
-        # asks under the same NuGetProvider component. Declining is not fatal.
+        # forward, so the refresh is an install command fetching a binary assembly. It
+        # asks under the same NuGetProvider component as the bootstrap, so one consent
+        # covers both. Declining is not fatal: the provider present keeps working.
         $nuget = @(Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue |
             Sort-Object Version -Descending)
         if (-not $nuget.Count) {
@@ -827,9 +849,10 @@
         # --- PowerShellGet and PSResourceGet ---------------------------------
         #
         #   absent                  an install, and asks
-        #   present but not ours    a shipped copy; Update-Module refuses it, so
-        #                           moving it forward is a side-by-side install,
-        #                           and asks
+        #   present but not ours    a shipped copy. Update-Module answers "Module
+        #                           'X' was not installed by using Install-Module,
+        #                           so it cannot be updated"; moving it forward is
+        #                           a side-by-side install, and asks
         #   present and ours        an update, and does not ask
         #
         # Windows PowerShell ships PowerShellGet 1.0.0.1 under Program Files and
@@ -861,7 +884,8 @@
                 }
 
                 # The same trap as -UpdateSelf: the module is loaded, so the files on
-                # disk are replaced and the cmdlets running now stay on memory.
+                # disk are replaced and the cmdlets running now stay on the code in
+                # memory.
                 Write-Output "$name updated. It loads in the next session; this run continues on the version already in memory."
                 continue
             }
@@ -893,8 +917,9 @@
         Add-SkippedStep -Name 'PowerShell modules'
     } else {
     Invoke-Step -Name 'PowerShell modules' -Tag 'PowerShell' -Action {
-        # Both update commands are silent on success, so the step reported only OK
-        # and a duration. Taken either side of the pass, this says what moved.
+        # Both update commands are silent on success; without this capture the step
+        # would report only OK and a duration. Taken either side of the pass, this
+        # says what moved.
         $before = Get-ModuleVersionMap
 
         if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
@@ -973,9 +998,23 @@
     Invoke-Step -Name 'Python (Install Manager)' -Tag 'Python' -Action {
         # Skipped rather than OK: a step that did nothing because the tool is absent
         # is not a step that updated something.
-        if     (Get-Command pymanager -ErrorAction SilentlyContinue) { pymanager install --update }
-        elseif (Get-Command py        -ErrorAction SilentlyContinue) { py install --update }
-        else   { Stop-StepAsSkipped -Reason 'the Python Install Manager is not installed' }
+        if (Get-Command pymanager -ErrorAction SilentlyContinue) {
+            pymanager install --update
+        } elseif (Get-Command py -ErrorAction SilentlyContinue) {
+            # Two tools answer to py: the Install Manager's alias, which has an
+            # install subcommand, and the classic launcher, which treats a bare
+            # word as a script path and errors. "py help install" tells them
+            # apart without changing anything: the alias exits 0, the launcher
+            # cannot open a script named help and does not.
+            $null = & py help install 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                $global:LASTEXITCODE = 0
+                Stop-StepAsSkipped -Reason 'py here is the classic launcher, which cannot update runtimes; the Python Install Manager replaces it'
+            }
+            py install --update
+        } else {
+            Stop-StepAsSkipped -Reason 'the Python Install Manager is not installed'
+        }
     }
 
     Invoke-Step -Name 'uv' -RequiresCommand 'uv' -Tag 'Python' -Action {
@@ -991,7 +1030,8 @@
 
         if ($LASTEXITCODE -ne 0) {
             # uv refuses to self-update when a package manager owns it and says so in
-            # its output, which is correct rather than failed. Any other non-zero is.
+            # its output, which is correct rather than failed. Any other non-zero
+            # exit is reported as a real failure.
             if (($output | Out-String) -match 'package manager|self-update.*(disabled|unavailable)') {
                 Write-Output 'uv declined to self-update because something else manages it.'
                 $global:LASTEXITCODE = 0
@@ -1004,7 +1044,8 @@
 
     Invoke-Step -Name 'pip' -Tag 'Python' -Action {
         # Never inside an active virtual environment: its packages belong to whatever
-        # project made it, and it is the easiest interpreter to reach from here.
+        # project made it, and it is both the easiest interpreter to reach from here
+        # and the worst one to change.
         if ($env:VIRTUAL_ENV) {
             Stop-StepAsSkipped -Reason "a virtual environment is active ($env:VIRTUAL_ENV), and its packages belong to that project rather than to this machine"
         }
@@ -1048,9 +1089,8 @@
             $others | ForEach-Object { Write-Output "  $($_.Trim())" }
         }
 
-        # Installed packages are left alone. pip has no upgrade-all, and upgrading
-        # each outdated package can silently downgrade another's dependency -- the
-        # problem pipx and uv exist to avoid, and both have their own steps.
+        # Installed packages are left alone; the README's Python section carries
+        # the why.
     }
 
     Invoke-Step -Name 'pipx packages' -RequiresCommand 'pipx' -Tag 'Python' -Action {
@@ -1070,8 +1110,9 @@
             $npmText = $npmOutput | Out-String
 
             # EBADENGINE means the newest npm does not support the installed Node,
-            # which is a fact about this machine. Reported in full, because the bare
-            # exit code does not say which it is.
+            # which is a fact about this machine rather than a fault in the update.
+            # Reported in full, because the bare exit code does not say which of
+            # the two it is.
             if ($npmText -match 'EBADENGINE') {
                 $nodeVersion = try { node --version 2>$null } catch { 'unknown' }
                 Write-Error ("npm could not update itself: the latest npm does not support the installed Node.js ($nodeVersion). " +
@@ -1269,8 +1310,8 @@
             Import-Module PSWindowsUpdate -ErrorAction Stop
 
             # Windows Update alone offers the OS and drivers; registering Microsoft
-            # Update widens the scan to Office. Managed devices often block this by
-            # policy, so degrade rather than fail.
+            # Update widens the scan to Office and other Microsoft products. Managed
+            # devices often block this by policy, so degrade rather than fail.
             $useMicrosoftUpdate = $false
             $muServiceId = '7971f918-a847-4430-9279-4a52d1efe18d'
             try {
