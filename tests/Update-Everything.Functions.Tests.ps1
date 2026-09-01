@@ -1051,23 +1051,51 @@ Describe 'Test-ElevationCapability' -Tag 'Unit','Security' {
         }
     }
 
-    Context 'A standard user who cannot elevate at all' {
+    Context 'An account that is not in the local Administrators group' {
+
+        # This used to refuse, and it was wrong on any machine running a
+        # privilege-management broker -- BeyondTrust, CyberArk EPM, Admin By
+        # Request -- where the account is deliberately not in the group and
+        # elevates anyway. Measured on one: not a member, Avecto Defendpoint
+        # running, elevated sessions working all day, and the module refusing to
+        # try. Refusing wrongly makes it unusable; attempting wrongly costs one
+        # prompt that is already reported well.
 
         BeforeEach {
             Mock Test-IsAdministrator { $false }
             Mock Test-AdministratorGroupMember { $false }
+            Mock Test-UacEnabled { $true }
+            Mock Test-PackagedProcess { $false }
         }
 
-        It 'refuses rather than raising a prompt that cannot succeed' {
-            (Test-ElevationCapability).CanElevate | Should-BeFalse
+        It 'attempts elevation rather than refusing' {
+            (Test-ElevationCapability).CanElevate | Should-BeTrue
         }
 
-        It 'explains that the account is not an administrator' {
-            (Test-ElevationCapability).Reason | Should-MatchString 'not a member of the local Administrators group'
+        It 'warns that the prompt may be refused' {
+            (Test-ElevationCapability).Caution | Should-MatchString 'may be refused'
+        }
+
+        It 'says why attempting is still worth it' {
+            (Test-ElevationCapability).Caution | Should-MatchString 'privilege-management broker'
         }
 
         It 'points at -SkipElevation as the way forward' {
-            (Test-ElevationCapability).Reason | Should-MatchString 'SkipElevation'
+            (Test-ElevationCapability).Caution | Should-MatchString 'SkipElevation'
+        }
+    }
+
+    Context 'The caution reaches the person running it' {
+
+        It 'is written as a warning before elevation is attempted' {
+            $source = Get-Content `
+                (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+
+            $warned = $source.IndexOf('if ($elevation.Caution) { Write-Warning $elevation.Caution }')
+            $attempt = $source.IndexOf('Invoke-SelfElevation -BoundParameters')
+
+            $warned | Should-BeGreaterThan -1
+            $warned | Should-BeLessThan $attempt
         }
     }
 
