@@ -70,9 +70,10 @@ and a suite that cries wolf is one people stop reading. They now report `N/A`
 with the reason, the run still passes, and the summary says how many checks it
 could not make.
 
-Real elevation coverage needs a VM that can boot with UAC on — a Hyper-V
-checkpoint restored between runs. That is a heavier harness than this one and
-has not been built.
+Real elevation coverage is now in [`tests/Elevation`](../Elevation/README.md),
+which runs on a real machine with UAC on and asks for one click. An *unattended*
+version still needs a VM that can boot with UAC on — a Hyper-V checkpoint
+restored between runs — and that has not been built.
 
 ## The UAC part
 

@@ -492,6 +492,10 @@ Before publishing:
 - Run the [fresh-machine smoke test](tests/FreshMachine/README.md). It is not
   part of `test.ps1`, it needs a hypervisor and several minutes, and it belongs
   before a release rather than before a commit.
+- Run the [self-elevation test](tests/Elevation/README.md) if the release touches
+  elevation. It needs one click on a UAC prompt, which is why it is not in
+  `test.ps1` either, and it covers the one path the fresh-machine test reports
+  `N/A` for.
 
 Afterwards, tag the exact commit that was published, so the permanent version
 has something in the history pointing at it:
