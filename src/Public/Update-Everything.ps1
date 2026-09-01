@@ -269,7 +269,8 @@
     $isFirstRun = -not @(Get-ChildItem -LiteralPath $logDir -Filter 'Update-Everything-*.log' `
         -File -ErrorAction SilentlyContinue).Count
 
-    # Step logs rotate per run and are pruned by age, with stale Terminal backups.
+    # Step logs rotate per run rather than being appended to, so old ones are
+    # pruned by age, as are stale Windows Terminal settings backups.
     if ($LogRetentionDays -gt 0) {
         $cutoff = (Get-Date).AddDays(-$LogRetentionDays)
         Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue |
@@ -350,8 +351,8 @@
     # decision is on record, before the install checks so skipping costs nothing.
     if ($PromptBeforeRun) {
         if (-not (Test-CanPrompt)) {
-        # A hidden window or redirected input cannot answer, and starting anyway beats
-        # blocking until the task time limit kills the run.
+            # A hidden window or redirected input cannot answer, and starting
+            # anyway beats blocking until the task time limit kills the run.
             Write-Warning 'PromptBeforeRun was requested, but this run cannot prompt (no interactive console, or input is redirected). Starting immediately.'
         } else {
             switch (Request-RunDecision -TimeoutSeconds $PromptTimeoutSeconds -DelayMinutes $DelayMinutes) {

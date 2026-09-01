@@ -5,7 +5,7 @@ function Get-GalleryModuleStatus {
         the PowerShell Gallery.
 
         .DESCRIPTION
-        Returns Installed, Available, Updatable and NeedsUpdate.
+        Returns Name, Installed, Available, Updatable and NeedsUpdate.
 
         Installed is $null when the module is absent, which is an install and
         needs consent, rather than an update, which does not.
