@@ -56,12 +56,15 @@ function Get-UpdateToolInventory {
             @{ Name = 'uv';              Command = 'uv';      VersionArgument = '--version' }
             @{ Name = 'pip';             Command = 'pip';     VersionArgument = '--version' }
             @{ Name = 'pipx';            Command = 'pipx';    VersionArgument = '--version' }
+            @{ Name = 'conda';           Command = 'conda';   VersionArgument = '--version' }
             @{ Name = '.NET SDK';        Command = 'dotnet';  VersionArgument = '--version' }
             @{ Name = 'rustup';          Command = 'rustup';  VersionArgument = '--version' }
             @{ Name = 'cargo-update';    Command = 'cargo-install-update'; VersionArgument = '--version' }
             @{ Name = 'Go';              Command = 'go';      VersionArgument = 'version' }
             @{ Name = 'gup';             Command = 'gup';     VersionArgument = 'version' }
             @{ Name = 'GitHub CLI';      Command = 'gh';      VersionArgument = '--version' }
+            @{ Name = 'Azure CLI';       Command = 'az';      VersionArgument = $null }
+            @{ Name = 'Google Cloud CLI'; Command = 'gcloud'; VersionArgument = $null }
             @{ Name = 'WSL';             Command = 'wsl';     VersionArgument = $null }
         )
     }

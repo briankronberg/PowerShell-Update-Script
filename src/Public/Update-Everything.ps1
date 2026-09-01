@@ -14,8 +14,9 @@
         PSWindowsUpdate, Microsoft 365 Apps, Defender signatures, PowerShell
         modules and help, Chocolatey, Scoop, Python, uv, pip, pipx, npm, Deno,
         Bun, pnpm, rustup, cargo binaries, Go binaries, dotnet, GitHub CLI
-        extensions, the WSL kernel, PowerShell 7 itself and the Windows Terminal
-        default profile. The README lists what each runs.
+        extensions, the Azure and Google Cloud CLIs, conda, the WSL kernel,
+        PowerShell 7 itself and the Windows Terminal default profile. The README
+        lists what each runs.
 
         Presence of an executable is not proof a feature is installed, and package
         managers routinely return non-zero for "nothing to do", so steps that
@@ -157,7 +158,8 @@
         every step.
 
         A step carries one or more of: Windows, Microsoft, PowerShell,
-        PackageManager, Python, Node, DotNet, Rust, Go, Git, Self, Inventory.
+        PackageManager, Python, Node, DotNet, Rust, Go, Cloud, Git, Self,
+        Inventory.
 
             Update-Everything -Tag Python
             Update-Everything -Tag Inventory    report what is installed, update nothing
@@ -240,9 +242,9 @@
         [switch] $Notify,
         [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Git', 'Self', 'Inventory')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Cloud', 'Git', 'Self', 'Inventory')]
         [string[]] $Tag = @(),
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Git', 'Self', 'Inventory')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Cloud', 'Git', 'Self', 'Inventory')]
         [string[]] $ExcludeTag = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30,
@@ -1101,6 +1103,19 @@
     # ---------------------------------------------------------------------------
     # 5. Node / npm
     # ---------------------------------------------------------------------------
+    # conda updates conda itself in the base environment and nothing else.
+    # Environments hold project package sets, and "conda update --all" is the
+    # operation the pip step's rule declines: upgrading one package can silently
+    # downgrade another's dependency.
+    Invoke-Step -Name 'conda' -RequiresCommand 'conda' -Tag 'Python' -Action {
+        $output = conda update --name base conda --yes 2>&1
+        $output
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "conda update failed with exit code $LASTEXITCODE. conda's own message is in this step's log."
+            $global:LASTEXITCODE = 0
+        }
+    }
+
     Invoke-Step -Name 'npm' -RequiresCommand 'npm' -Tag 'Node' -Action {
         # npm writes progress and deprecation notices to stderr as a matter of
         # course, so judge it by exit code. Output is captured as well as passed
@@ -1315,6 +1330,46 @@
             return
         }
         gh extension upgrade --all
+    }
+
+    # ---------------------------------------------------------------------------
+    # 7b. Cloud CLIs
+    # ---------------------------------------------------------------------------
+    # Both talk to a vendor endpoint and can pull a large payload, which is what
+    # the Cloud tag is for: -ExcludeTag Cloud drops the pair on a metered or
+    # offline machine.
+
+    # az upgrade reruns the MSI on the standard Windows install, so the step
+    # needs the elevation it would otherwise stall asking for. It also updates
+    # installed az extensions by default.
+    Invoke-Step -Name 'Azure CLI' -RequiresCommand 'az' -RequiresAdmin -Tag 'Cloud' -Action {
+        $output = az upgrade --yes --only-show-errors 2>&1
+        $output
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "az upgrade failed with exit code $LASTEXITCODE. az's own message is in this step's log."
+            $global:LASTEXITCODE = 0
+        }
+    }
+
+    Invoke-Step -Name 'Google Cloud CLI' -RequiresCommand 'gcloud' -Tag 'Cloud' -Action {
+        # A gcloud that Chocolatey or Scoop installed disables its own component
+        # manager, so self-update is only right for the bundled install.
+        $owner = Get-ToolInstallSource -Name 'gcloud'
+        if ($owner -notin 'Standalone', 'Unknown') {
+            Stop-StepAsSkipped -Reason "gcloud is managed by $owner, which updates it in its own step"
+        }
+
+        $output = gcloud components update --quiet 2>&1
+        $output
+        if ($LASTEXITCODE -ne 0) {
+            if (($output | Out-String) -match 'component manager is disabled') {
+                Write-Output 'gcloud declined to self-update because its component manager is disabled for this install.'
+                $global:LASTEXITCODE = 0
+            } else {
+                Write-Error "gcloud components update failed with exit code $LASTEXITCODE. gcloud's own message is in this step's log."
+                $global:LASTEXITCODE = 0
+            }
+        }
     }
 
     # ---------------------------------------------------------------------------
