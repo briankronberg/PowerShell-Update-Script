@@ -1062,13 +1062,12 @@ Describe 'Test-ElevationCapability' -Tag 'Unit','Security' {
 
     Context 'An account that is not in the local Administrators group' {
 
-        # This used to refuse, and it was wrong on any machine running a
-        # privilege-management broker -- BeyondTrust, CyberArk EPM, Admin By
-        # Request -- where the account is deliberately not in the group and
-        # elevates anyway. Measured on one: not a member, Avecto Defendpoint
-        # running, elevated sessions working all day, and the module refusing to
-        # try. Refusing wrongly makes it unusable; attempting wrongly costs one
-        # prompt that is already reported well.
+        # Not being in the group is a Caution rather than a refusal. Machines
+        # running a privilege-management broker -- BeyondTrust, CyberArk EPM,
+        # Admin By Request -- keep the account out of the group and elevate it
+        # anyway, often per application, so membership does not settle whether
+        # elevation is available. A prompt that then fails is already reported
+        # well.
 
         BeforeEach {
             Mock Test-IsAdministrator { $false }
@@ -1918,8 +1917,8 @@ Describe 'Updating the module itself' -Tag 'Static' {
     }
 
     It 'says an update lands on the next run, on both paths' {
-        $matches = [regex]::Matches($script:SelfSource, 'loads on the next run')
-        $matches.Count | Should-BeGreaterThanOrEqual 2
+        $onNextRun = [regex]::Matches($script:SelfSource, 'loads on the next run')
+        $onNextRun.Count | Should-BeGreaterThanOrEqual 2
     }
 }
 
@@ -2323,11 +2322,11 @@ Describe 'An expected answer does not throw' -Tag 'Static' {
     #   PS>TerminatingError(Find-PackageProvider): "...No match was found for
     #   the specified search criteria and package name 'NuGet'."
     #
-    # The step went on to report the right thing. Test-PendingReboot already
-    # carried this lesson about Get-ItemProperty, and the gallery work repeated
-    # it. These two lookups have an expected empty answer on supported hosts:
-    # Find-PackageProvider cannot answer at all on PowerShell 7, and Find-Module
-    # is asked about modules that may not be published.
+    # The step goes on to report the right thing. Both lookups have an expected
+    # empty answer on supported hosts: Find-PackageProvider cannot answer at all
+    # on PowerShell 7, and Find-Module is asked about modules that may not be
+    # published. Test-PendingReboot uses SilentlyContinue with Get-ItemProperty
+    # for the same reason.
 
     BeforeAll {
         $script:LookupSources = @{
@@ -2620,14 +2619,12 @@ Describe 'pip is in the inventory' -Tag 'Unit' {
 Describe 'Get-ElevationPolicyNote names a privilege broker' -Tag 'Unit' {
 
     # A broker can deny an elevation, or allow one application and refuse
-    # another, without leaving anything in the registry. Before this, a refusal
-    # on such a machine produced no note at all -- which reads as "no policy is
-    # interfering" when one just did.
+    # another, without leaving anything in the registry, so a machine can refuse
+    # while every policy value reads as permissive.
     #
-    # Recognising vendors by service name would be the wrong trade for a
-    # decision: the next vendor would be missed and a capable machine turned
-    # away. It is the right trade for an explanation, where a missing entry costs
-    # a sentence and decides nothing.
+    # Vendors are recognised by service name, so a vendor absent from the list is
+    # not mentioned. Nothing is decided either way: the note only explains a
+    # refusal that has already happened.
 
     BeforeEach {
         # Nothing restrictive in the registry, so only the broker can produce a

@@ -64,10 +64,10 @@ BeforeDiscovery {
     $LintTargets += (Join-Path $RepoRoot 'test.ps1')
     $LintTargets += (Join-Path $RepoRoot 'Install.ps1')
 
-    # The fresh-machine harness. Pester never runs these -- it discovers
-    # *.Tests.ps1 only -- but they are the house style's problem like anything
-    # else, and nothing else in the suite would look at them.
-    $LintTargets += @(Get-ChildItem -Path (Join-Path $RepoRoot 'tests\FreshMachine') -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue |
+    # Everything under tests\: the test files, and the fresh-machine and
+    # elevation harnesses. Pester runs *.Tests.ps1 and nothing runs the
+    # harnesses, so for the harnesses the analyzer is the only reader they have.
+    $LintTargets += @(Get-ChildItem -Path (Join-Path $RepoRoot 'tests') -Filter *.ps1 -Recurse -ErrorAction SilentlyContinue |
             ForEach-Object { $_.FullName })
 }
 
@@ -357,10 +357,9 @@ Describe 'Shared run state' -Tag 'Static','Module' {
 
 Describe 'Logging starts before the run can decline to start' -Tag 'Static','Module' {
 
-    # Logging used to be set up after elevation succeeded, so every path that
-    # ended the run early produced no log at all. A PowerShell 7 run that could
-    # not elevate left nothing behind to read, which is exactly the case someone
-    # would go looking for a log to explain.
+    # Logging is set up before elevation is attempted, so a path that ends the
+    # run early still leaves a log behind. A PowerShell 7 run that cannot
+    # elevate is exactly the case someone goes looking for a log to explain.
 
     BeforeAll {
         $script:Source = Get-Content $script:MainPath -Raw
@@ -859,19 +858,28 @@ Describe 'PSScriptAnalyzer' -Tag 'Lint' -Skip:(-not $HasAnalyzer) {
     It 'reports no errors or warnings in <_>' -ForEach $LintTargets {
         $path = $_
 
-        # Pester puts -ForEach data in BeforeDiscovery variables the analyzer
-        # cannot see being consumed, so every test file trips
-        # PSUseDeclaredVarsMoreThanAssignments.
+        # Two rules a test file breaks by doing its job. Pester puts -ForEach
+        # data in BeforeDiscovery variables the analyzer cannot see being
+        # consumed, so every test file trips
+        # PSUseDeclaredVarsMoreThanAssignments. Shadowing a cmdlet inside a
+        # scoped scriptblock is how a test intercepts a call that Mock cannot
+        # reach, which is what PSAvoidOverwritingBuiltInCmdlets is for.
         $extra = @{}
         if ($path -like '*\tests\*') {
-            $extra['ExcludeRule'] = @('PSUseDeclaredVarsMoreThanAssignments')
+            $extra['ExcludeRule'] = @(
+                'PSUseDeclaredVarsMoreThanAssignments'
+                'PSAvoidOverwritingBuiltInCmdlets'
+            )
         }
 
         $findings = Invoke-ScriptAnalyzer -Path $path `
             -Settings (Join-Path (Split-Path $PSScriptRoot -Parent) 'PSScriptAnalyzerSettings.psd1') @extra
 
         $detail = ($findings | ForEach-Object { '{0}:{1} {2}' -f $_.RuleName, $_.Line, $_.Message }) -join "`n"
-        $findings | Should-BeNull -Because "the baseline is clean, so these are new:`n$detail"
+        # Counted rather than compared to null: a failed Should-BeNull prints the
+        # whole DiagnosticRecord, burying the rule and line under the extents and
+        # script positions hanging off it.
+        @($findings).Count | Should-Be 0 -Because "the baseline is clean, so these are new:`n$detail"
     }
 }
 

@@ -112,8 +112,9 @@ try {
     if ($amAdmin) {
         # A scheduled task at RunLevel Limited is how an elevated session starts
         # a genuinely unelevated child of the same user. Without it this test
-        # would run as an administrator and measure nothing, which is exactly how
-        # the relaunch shipped broken in the first place.
+        # would run as an administrator and measure nothing, because
+        # Update-Everything reaches the relaunch only when the session is not
+        # already elevated.
         $usedTask = $true
         Write-Host '  this session is elevated, so dropping privileges through a scheduled task...' -ForegroundColor DarkGray
 
