@@ -2315,3 +2315,140 @@ Describe 'An expected answer does not throw' -Tag 'Static' {
         $script:LookupSources[$_] | Should-MatchString 'failed outright'
     }
 }
+
+Describe 'Get-WingetUpgradeTable' -Tag 'Unit' {
+
+    # The sample is the real table from a Windows 365 VM, which is where the
+    # reporting gap was noticed. winget localises its headers and truncates the
+    # Id column to the console width, so the parser anchors on the row of dashes
+    # and takes column positions from the header's word starts -- neither of
+    # which depends on the language.
+
+    BeforeAll {
+        $script:RealTable = @'
+Name                 Id                       Version Available Source
+----------------------------------------------------------------------
+Cisco Webex Meetings Cisco.CiscoWebexMeetings 45.6.4  45.6.4.8  winget
+uv                   astral-sh.uv             0.11.19 0.12.7    winget
+2 upgrades available.
+'@
+    }
+
+    It 'finds both rows' {
+        @(Get-WingetUpgradeTable -Text $script:RealTable) | Should-BeCollection -Count 2
+    }
+
+    It 'reads the ids' {
+        $ids = @(Get-WingetUpgradeTable -Text $script:RealTable).Id
+        $ids | Should-ContainCollection 'astral-sh.uv'
+        $ids | Should-ContainCollection 'Cisco.CiscoWebexMeetings'
+    }
+
+    It 'reads the installed and available versions' {
+        $uv = @(Get-WingetUpgradeTable -Text $script:RealTable) | Where-Object { $_.Id -eq 'astral-sh.uv' }
+        $uv.Version   | Should-Be '0.11.19'
+        $uv.Available | Should-Be '0.12.7'
+    }
+
+    It 'keeps a name that contains spaces in one piece' {
+        $webex = @(Get-WingetUpgradeTable -Text $script:RealTable) | Where-Object { $_.Id -like 'Cisco*' }
+        $webex.Name | Should-Be 'Cisco Webex Meetings'
+    }
+
+    # "2 upgrades available." is winget's own summary, localised, and not a row.
+    It 'stops at the blank line rather than reading the summary as a package' {
+        @(Get-WingetUpgradeTable -Text $script:RealTable).Id | Should-NotContainCollection '2'
+    }
+
+    # The header row is the only part of the table that is English here. Anchor
+    # on the dashes and the column positions, and a German or Japanese console
+    # parses the same.
+    It 'parses a table whose headers are not English' {
+        $localised = @'
+Name                 Kennung                  Version Verfuegbar Quelle
+-----------------------------------------------------------------------
+uv                   astral-sh.uv             0.11.19 0.12.7     winget
+'@
+        (Get-WingetUpgradeTable -Text $localised).Id | Should-Be 'astral-sh.uv'
+    }
+
+    It 'returns nothing when there is no table' {
+        Get-WingetUpgradeTable -Text 'No installed package found matching input criteria.' | Should-BeNull
+    }
+
+    It 'returns nothing for empty input' {
+        Get-WingetUpgradeTable -Text '' | Should-BeNull
+        Get-WingetUpgradeTable -Text $null | Should-BeNull
+    }
+}
+
+Describe 'Get-WingetLeftover' -Tag 'Unit' {
+
+    # The two outcomes that need different answers. From the run this came from:
+    # uv was attempted and failed on a file in use, Webex was listed and never
+    # attempted because the newer package does not apply to that system. One
+    # exit code covered both.
+
+    BeforeAll {
+        $script:Before = @(
+            [pscustomobject]@{ Name = 'Cisco Webex Meetings'; Id = 'Cisco.CiscoWebexMeetings'; Version = '45.6.4'; Available = '45.6.4.8' }
+            [pscustomobject]@{ Name = 'uv'; Id = 'astral-sh.uv'; Version = '0.11.19'; Available = '0.12.7' }
+        )
+
+        # Trimmed from the real transcript. The "Found ... [id]" line is what
+        # winget writes when it begins a package, and is the only reliable
+        # signal that one was attempted.
+        $script:Output = @'
+Cisco Webex Meetings Cisco.CiscoWebexMeetings 45.6.4  45.6.4.8  winget
+uv                   astral-sh.uv             0.11.19 0.12.7    winget
+2 upgrades available.
+(1/1) Found uv [astral-sh.uv] Version 0.12.7
+Successfully verified installer hash
+Starting package install...
+An unexpected error occurred while executing the command:
+remove: Access is denied.: "C:\...\WinGet\Packages\astral-sh.uv_...\uv.exe"
+'@
+    }
+
+    It 'reports both packages that are still listed' {
+        @(Get-WingetLeftover -Before $script:Before -After $script:Before -Output $script:Output) |
+            Should-BeCollection -Count 2
+    }
+
+    It 'marks the one winget named as attempted' {
+        $uv = @(Get-WingetLeftover -Before $script:Before -After $script:Before -Output $script:Output) |
+            Where-Object { $_.Id -eq 'astral-sh.uv' }
+        $uv.Attempted | Should-BeTrue
+    }
+
+    # Webex appears in the upgrade table inside the same output, so a plain
+    # substring search would call it attempted. Only the "[id]" marker counts.
+    It 'does not mistake a table row for an attempt' {
+        $webex = @(Get-WingetLeftover -Before $script:Before -After $script:Before -Output $script:Output) |
+            Where-Object { $_.Id -eq 'Cisco.CiscoWebexMeetings' }
+        $webex.Attempted | Should-BeFalse
+    }
+
+    It 'names a file in use as something the reader can act on' {
+        $uv = @(Get-WingetLeftover -Before $script:Before -After $script:Before -Output $script:Output) |
+            Where-Object { $_.Id -eq 'astral-sh.uv' }
+        $uv.Reason | Should-MatchString 'in use'
+    }
+
+    It 'says a skipped package is expected to stay that way' {
+        $webex = @(Get-WingetLeftover -Before $script:Before -After $script:Before -Output $script:Output) |
+            Where-Object { $_.Id -eq 'Cisco.CiscoWebexMeetings' }
+        $webex.Reason | Should-MatchString 'does not apply'
+    }
+
+    It 'reports nothing when everything upgraded' {
+        Get-WingetLeftover -Before $script:Before -After @() -Output $script:Output | Should-BeNull
+    }
+
+    It 'carries the versions through for the report' {
+        $uv = @(Get-WingetLeftover -Before $script:Before -After $script:Before -Output $script:Output) |
+            Where-Object { $_.Id -eq 'astral-sh.uv' }
+        $uv.Version   | Should-Be '0.11.19'
+        $uv.Available | Should-Be '0.12.7'
+    }
+}
