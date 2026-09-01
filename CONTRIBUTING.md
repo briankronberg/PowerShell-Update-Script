@@ -473,6 +473,37 @@ Maintainers only, and not casually: the PowerShell Gallery has no delete, only
 unlist, which hides a version from search while leaving it installable by anyone
 who names it.
 
+### Only x.y.0 reaches the gallery
+
+Minor versions are published. Patch versions are not, and live on `main` for
+whoever wants them:
+
+| Version | Where |
+|---|---|
+| 1.2.0, 1.3.0, 1.4.0 | PowerShell Gallery, and GitHub |
+| 1.2.1, 1.2.2 | GitHub only |
+
+Every gallery version is permanent -- unlist hides it from search and leaves it
+installable -- so each one is a commitment, and fewer of them means fewer to
+stand behind.
+
+Two things follow, and both are already handled rather than needing thought at
+release time:
+
+A patch fix reaches people through the GitHub install, so the README's
+**Install from GitHub** section is not a footnote. It is the supported route to
+anything not yet in a minor release, and it says so.
+
+`Update-Everything -UpdateSelf` defaults to `-UpdateSelfSource Gallery`, which is
+right for most people and wrong for anyone tracking a fix. `Main` is the setting
+for that, and the help says which is which.
+
+A run reports both, so nobody has to work it out:
+
+```
+UpdateEverything 1.2.1 is running, ahead of the published 1.2.0.
+```
+
 `Publish.ps1` front-loads every check before it sends anything, and `-WhatIf`
 runs those checks and stops:
 

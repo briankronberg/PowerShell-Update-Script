@@ -26,8 +26,11 @@ Requires PowerShell 5.1 or later on Windows 10 or a matching Server release.
 
 ### Install from GitHub
 
-The gallery carries releases. `main` carries what is being worked on, which is
-where to get a fix that has landed but not shipped. Nothing but the URL is
+**The gallery carries minor versions only** -- 1.2.0, 1.3.0, 1.4.0. A patch
+release such as 1.2.1 is published here and nowhere else, so this is the
+supported way to get a fix that has landed but is not in a minor release yet.
+
+`main` also carries whatever is being worked on. Nothing but the URL is
 needed:
 
 ```powershell
@@ -46,8 +49,9 @@ it does nothing; on every one after, it is what makes the line safe to paste
 again. Nothing is lost if it is interrupted: the installer stages the new copy
 and validates it before it replaces the old one.
 
-`Update-Everything -UpdateSelf` does the same thing from inside a run, and also
-tracks `main` rather than the gallery.
+`Update-Everything -UpdateSelf -UpdateSelfSource Main` does the same thing from
+inside a run. The default source is `Gallery`, which is right for most people
+and wrong for anyone tracking a patch.
 
 ### Why that command is shaped the way it is
 
