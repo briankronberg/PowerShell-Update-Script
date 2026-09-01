@@ -337,6 +337,30 @@ nothing. It never installs a tool just to make a step possible.
 So the answer comes in two halves. Some products it updates by name. For the
 rest, a package manager's own inventory decides.
 
+### When winget leaves something behind
+
+`winget upgrade --all` returns one exit code for the whole pass, so a partial
+failure used to say only that *something* did not upgrade. The step now names
+them, and separates the two cases:
+
+```
+Still out of date after this run:
+  astral-sh.uv 0.11.19 -> 0.12.7  (the install failed; a file was in use,
+                                   so close the program and run again)
+
+Not upgradable on this machine, and expected to stay that way:
+  Cisco.CiscoWebexMeetings 45.6.4 -> 45.6.4.8  (winget listed it and did not
+                                   attempt it, usually because the newer
+                                   package does not apply to this system)
+```
+
+The distinction matters. The first is worth doing something about; the second
+will not change until the vendor ships a package that applies, and reporting it
+as a failure on every run is how people learn to skim past the ones that are.
+
+**The step is only marked `Warning` for packages winget actually attempted.** One
+it declined is not a fault of the run and does not colour it.
+
 ### Products updated by name
 
 | Product | How it updates |

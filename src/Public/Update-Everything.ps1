@@ -599,8 +599,18 @@
     }
 
     Invoke-Step -Name 'winget (all sources)' -RequiresCommand 'winget' -Tag 'Windows', 'PackageManager' -Action {
+        # Accumulated and passed through in one pass, rather than captured and
+        # echoed afterwards. A winget upgrade can run for minutes and the console
+        # should show it happening.
+        #
+        # The upgrade table winget prints first is the "before" list, so no extra
+        # call is needed for it.
+        $captured = [System.Collections.Generic.List[string]]::new()
+
         winget upgrade --all --include-unknown --silent `
-            --accept-source-agreements --accept-package-agreements --disable-interactivity
+            --accept-source-agreements --accept-package-agreements --disable-interactivity 2>&1 |
+            ForEach-Object { $captured.Add("$_"); $_ }
+
         $code = $LASTEXITCODE
         $global:LASTEXITCODE = 0
 
@@ -609,7 +619,53 @@
         # running) failing while the rest upgrade fine. Report the code instead of
         # failing the run over it; Write-Error marks the step 'Warning'.
         if ($code -ne 0 -and $WingetNothingToDo -notcontains $code) {
-            Write-Error ('winget upgrade --all returned {0} (0x{0:X8}); one or more packages may not have upgraded.' -f $code)
+
+            # Which ones, and whether anything can be done about them. The exit
+            # code says only that something did not upgrade, and a person then
+            # has to read the step log to find out what -- or, as happened,
+            # notice across two runs that one package never moves.
+            $text = $captured -join "`n"
+            $before = @(Get-WingetUpgradeTable -Text $text)
+            $after = @(Get-WingetUpgradeTable -Text (
+                winget upgrade --include-unknown --disable-interactivity 2>&1 | Out-String))
+            $global:LASTEXITCODE = 0
+
+            $leftover = @(Get-WingetLeftover -Before $before -After $after -Output $text)
+
+            $attempted = @($leftover | Where-Object { $_.Attempted })
+            $skipped = @($leftover | Where-Object { -not $_.Attempted })
+
+            if ($attempted.Count) {
+                Write-Output ''
+                Write-Output 'Still out of date after this run:'
+                foreach ($package in $attempted) {
+                    Write-Output ("  {0} {1} -> {2}  ({3})" -f $package.Id, $package.Version, $package.Available, $package.Reason)
+                }
+            }
+
+            # Written as information rather than as a problem. These do not
+            # change until the vendor ships something that applies, so a person
+            # who reads them as failures learns to skim past the ones that are.
+            if ($skipped.Count) {
+                Write-Output ''
+                Write-Output 'Not upgradable on this machine, and expected to stay that way:'
+                foreach ($package in $skipped) {
+                    Write-Output ("  {0} {1} -> {2}  ({3})" -f $package.Id, $package.Version, $package.Available, $package.Reason)
+                }
+            }
+
+            # The error, and so the Warning status, is raised only for something
+            # that was actually tried. A package winget declined is not a fault
+            # of this run and must not colour it.
+            if ($attempted.Count) {
+                Write-Error ('winget could not upgrade {0} package(s): {1}. Exit code {2} (0x{2:X8}).' -f
+                    $attempted.Count, (($attempted.Id) -join ', '), $code)
+            } elseif (-not $leftover.Count) {
+                Write-Error ('winget upgrade --all returned {0} (0x{0:X8}); one or more packages may not have upgraded.' -f $code)
+            } else {
+                Write-Output ''
+                Write-Output 'Nothing this run could have upgraded was left behind.'
+            }
         } elseif ($code -ne 0) {
             Write-Output 'winget reports nothing left to upgrade.'
         }
