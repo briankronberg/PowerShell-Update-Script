@@ -819,18 +819,25 @@
             Write-Output 'No NuGet package provider is present; the Trust PSGallery step reports why.'
         } else {
             $current = $nuget[0].Version
+
+            # SilentlyContinue and a check, not Stop and a catch. PowerShell 7
+            # registers no provider bootstrap source, so this cannot be answered
+            # there at all -- the normal, healthy case on half the supported
+            # hosts. Start-Transcript records a terminating error whether or not
+            # it is caught, so throwing for the expected answer puts
+            # "TerminatingError(Find-PackageProvider)" in the middle of a step
+            # that went on to report the right thing.
+            #
+            # Test-PendingReboot carries the same lesson about Get-ItemProperty.
             $newest = $null
             try {
-                $candidates = @(Find-PackageProvider -Name NuGet -ErrorAction Stop |
+                $candidates = @(Find-PackageProvider -Name NuGet -ErrorAction SilentlyContinue |
                     Sort-Object Version -Descending)
                 if ($candidates.Count) { $newest = $candidates[0].Version }
             } catch {
-                # PowerShell 7 registers no provider bootstrap source, so this
-                # cannot be answered there at all and fails with "No match was
-                # found". Windows PowerShell answers it. Neither is a fault, and
-                # the provider that is present keeps working either way, so the
-                # detail goes to the verbose stream rather than the summary.
-                Write-Verbose "Could not ask for the newest NuGet provider: $($_.Exception.Message)"
+                # A backstop for a hard failure. The ordinary answer no longer
+                # throws, which is the point.
+                Write-Verbose "Asking for the newest NuGet provider failed outright: $($_.Exception.Message)"
             }
 
             if (-not $newest) {
