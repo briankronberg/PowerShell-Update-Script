@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(cd *)",
+      "PowerShell(Select-String *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Get-ChildItem *)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(Get-Module *)",
+      "PowerShell(Get-Help *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Get-ItemProperty *)",
+      "PowerShell(Test-ModuleManifest *)",
+      "PowerShell(Import-PowerShellDataFile *)",
+      "PowerShell(Find-Module *)",
+      "PowerShell(git status *)",
+      "PowerShell(git log *)",
+      "PowerShell(git diff *)",
+      "PowerShell(git show *)",
+      "PowerShell(git branch *)",
+      "PowerShell(gh pr checks *)",
+      "PowerShell(gh pr list *)",
+      "PowerShell(gh pr view *)",
+      "PowerShell(gh issue list *)",
+      "PowerShell(gh issue view *)",
+      "PowerShell(gh release list *)",
+      "PowerShell(gh release view *)",
+      "PowerShell(winget search *)"
+    ]
+  }
+}
