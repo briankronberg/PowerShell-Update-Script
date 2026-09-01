@@ -1903,6 +1903,47 @@ Describe 'The PowerShell modules step' -Tag 'Static' {
     }
 }
 
+Describe '-UpdateSelf runs only the self step' -Tag 'Static' {
+
+    BeforeAll {
+        $source = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+
+        # The guard block, told apart from the step's own if ($UpdateSelf) by
+        # the inner tag check.
+        $script:Guard = [regex]::Match($source,
+            "(?s)if \(\`$UpdateSelf\) \{\s*\n\s*if \(\`$Tag.*?\n    \}").Value
+    }
+
+    It 'found the guard' {
+        $script:Guard | Should-NotBeEmptyString
+    }
+
+    It 'narrows the run to the Self tag' {
+        $script:Guard | Should-MatchString "\`$Tag = @\('Self'\)"
+    }
+
+    It 'clears any exclusion, so -ExcludeTag Self cannot empty the run' {
+        $script:Guard | Should-MatchString "\`$ExcludeTag = @\(\)"
+    }
+
+    It 'skips elevation, which a CurrentUser install never needs' {
+        $script:Guard | Should-MatchString "\`$SkipElevation = \`$true"
+    }
+
+    It 'says so when tags were also passed' {
+        $script:Guard | Should-MatchString 'ignored'
+    }
+
+    It 'runs before the elevation decision it suppresses' {
+        $guardAt = $source.IndexOf('-UpdateSelf is a shortcut')
+        $elevationAt = $source.IndexOf('$script:isAdmin = Test-IsAdministrator')
+
+        $guardAt | Should-BeGreaterThan 0
+        $guardAt | Should-BeLessThan $elevationAt
+    }
+}
+
 Describe 'Updating the module itself' -Tag 'Static' {
 
     BeforeAll {
