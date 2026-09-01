@@ -2276,3 +2276,42 @@ Describe 'A run says which version produced it' -Tag 'Static' {
         $lookup | Should-BeLessThan $selfStep
     }
 }
+
+Describe 'An expected answer does not throw' -Tag 'Static' {
+
+    # Start-Transcript records a terminating error whether or not it is caught,
+    # so throwing for an outcome that is expected puts a TerminatingError line in
+    # a run log where nothing went wrong. Reported from a 1.1.0 run:
+    #
+    #   PS>TerminatingError(Find-PackageProvider): "...No match was found for
+    #   the specified search criteria and package name 'NuGet'."
+    #
+    # The step went on to report the right thing. Test-PendingReboot already
+    # carried this lesson about Get-ItemProperty, and the gallery work repeated
+    # it. These two lookups have an expected empty answer on supported hosts:
+    # Find-PackageProvider cannot answer at all on PowerShell 7, and Find-Module
+    # is asked about modules that may not be published.
+
+    BeforeAll {
+        $script:LookupSources = @{
+            'Update-Everything.ps1'      = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+            'Get-GalleryModuleStatus.ps1' = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Get-GalleryModuleStatus.ps1') -Raw
+        }
+    }
+
+    It 'does not ask Find-PackageProvider to throw for an empty answer' {
+        $script:LookupSources['Update-Everything.ps1'] |
+            Should-NotMatchString 'Find-PackageProvider[^\r\n]*-ErrorAction Stop'
+    }
+
+    It 'does not ask Find-Module to throw for an empty answer' {
+        $script:LookupSources['Get-GalleryModuleStatus.ps1'] |
+            Should-NotMatchString 'Find-Module[^\r\n]*-ErrorAction Stop'
+    }
+
+    # SilentlyContinue only suppresses non-terminating errors, so a hard network
+    # failure still throws and still must not take the step with it.
+    It 'still guards <_> against a hard failure' -ForEach @('Update-Everything.ps1', 'Get-GalleryModuleStatus.ps1') {
+        $script:LookupSources[$_] | Should-MatchString 'failed outright'
+    }
+}

@@ -54,17 +54,34 @@ function Get-GalleryModuleStatus {
         $updatable = [bool] (Get-InstalledModule -Name $Name -ErrorAction SilentlyContinue)
     }
 
+    # SilentlyContinue and a check, not Stop and a catch. A module the gallery
+    # does not have, and a gallery that cannot be reached, are both ordinary
+    # answers here rather than faults -- and Start-Transcript records a
+    # terminating error whether or not it is caught, so throwing for either would
+    # put "TerminatingError(Find-Module)" in a run log where nothing went wrong.
+    # Since the self-version check calls this on every run, that would be every
+    # run on a machine with no network.
     $available = $null
+    $found = $null
     try {
-        $found = Find-Module -Name $Name -Repository PSGallery -ErrorAction Stop
+        # The catch is a backstop, not the mechanism. SilentlyContinue keeps the
+        # ordinary answers -- no such module, gallery unreachable -- from
+        # throwing at all, which is what keeps them out of the transcript. A
+        # genuinely terminating failure still exists and still has to not take
+        # the step with it.
+        $found = Find-Module -Name $Name -Repository PSGallery -ErrorAction SilentlyContinue
+    } catch {
+        Write-Verbose "Asking the gallery about ${Name} failed outright: $($_.Exception.Message)"
+    }
 
+    if ($found) {
         # Find-Module returns the version as a string on some PowerShellGet
         # versions and a [version] on others, and a prerelease carries a suffix
         # that [version] cannot parse. Trim the suffix and let the cast decide.
         $raw = "$($found.Version)" -replace '-.*$', ''
         if ($raw) { $available = [version] $raw }
-    } catch {
-        Write-Verbose "Could not ask the gallery about ${Name}: $($_.Exception.Message)"
+    } else {
+        Write-Verbose "The gallery had no answer for ${Name}; it may be absent or unreachable."
     }
 
     [pscustomobject]@{
