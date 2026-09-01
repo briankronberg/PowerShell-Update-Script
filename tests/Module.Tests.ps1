@@ -1131,9 +1131,9 @@ Describe 'No step updates through a tool it has not verified' -Tag 'Static','Mod
 
     # Self-update is only right when nothing else owns the tool. Running it
     # against a scoop or winget install fights that manager.
-    It 'asks who owns uv before telling it to update itself' {
+    It 'asks who owns <_> before telling it to update itself' -ForEach @('uv', 'Deno', 'Bun', 'pnpm') {
         $source = Get-Content (Join-Path $script:ModuleRoot 'Public\Update-Everything.ps1') -Raw
-        $step = [regex]::Match($source, "(?s)Invoke-Step -Name 'uv'.*?\r?\n    \}").Value
+        $step = [regex]::Match($source, "(?s)Invoke-Step -Name '$_'.*?\r?\n    \}").Value
 
         $step | Should-MatchString 'Get-ToolInstallSource'
         $step | Should-MatchString 'Stop-StepAsSkipped'

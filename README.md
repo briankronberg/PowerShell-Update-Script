@@ -267,7 +267,7 @@ thing that crosses a process boundary.
 more of:
 
 `Windows` `Microsoft` `PowerShell` `PackageManager` `Python` `Node` `DotNet`
-`Rust` `Git` `Self` `Inventory`
+`Rust` `Go` `Git` `Self` `Inventory`
 
 ```powershell
 Update-Everything -Tag Python
@@ -298,13 +298,13 @@ called out of date.
 quickest way to see why a run skipped what it skipped:
 
 ```
-10 of 15 tools present.
+12 of 21 tools present.
 
   winget           Unknown     v1.29.290
   PowerShell 7     Unknown     PowerShell 7.6.5
   uv               Standalone  uv 0.12.7
 
-Not installed: .NET SDK, Chocolatey, pipx, rustup, Scoop
+Not installed: .NET SDK, Bun, Chocolatey, Deno, gup, pipx, pnpm, rustup, Scoop
 Their steps report Skipped, which is the expected result rather than a fault.
 
 WARNING: PowerShell 7 is installed in 2 places; the first is the one that runs:
@@ -399,6 +399,9 @@ choose the packages; the manager's own inventory does.
 | Chocolatey | `choco` | `choco upgrade all -y` | Everything installed as a Chocolatey package. Exit codes 1641 and 3010 pass, since those are the MSI "reboot required" codes rather than failures. |
 | Scoop | `scoop` | `scoop update`, `scoop update *`, `scoop cleanup *`, each run on its own | Scoop, its buckets, installed apps, then old versions. The phases run separately so a broken bucket cannot hide the rest. |
 | npm | `npm` | `npm install -g npm@latest`, then `npm update -g` only with `-UpdateGlobalNpm` | npm itself, every run. Global packages only on request, because upgrading them can move a pinned toolchain. |
+| Deno | `deno`, plus an ownership check | `deno upgrade` | Deno itself, when nothing else owns it. |
+| Bun | `bun`, plus an ownership check | `bun upgrade` | Bun itself, when nothing else owns it. |
+| pnpm | `pnpm`, plus an ownership check | `pnpm self-update` | The standalone pnpm only. A Corepack-managed pnpm is pinned per project and left to Corepack. |
 | pip | `py`, else `python` | `<interpreter> -m pip install --upgrade pip --disable-pip-version-check` | pip itself, for the first of those found. Where `py` is present that is the launcher's default interpreter, which is not always the `python` on `PATH`. Installed packages are left alone -- see [Python](#python). |
 | pipx | `pipx` | `pipx upgrade-all` | Every Python application pipx installed. |
 | uv | `uv`, plus an ownership check | `uv self update` | uv itself, and only when nothing else owns it. |
@@ -406,6 +409,8 @@ choose the packages; the manager's own inventory does.
 | .NET SDK | `dotnet`, plus an SDK version of 6 or higher | `dotnet tool update --all --global`, falling back to updating each tool by name | Global .NET tools. `dotnet` exists for runtime-only installs too, so the step confirms the SDK before using it. |
 | .NET workloads | `dotnet` | `dotnet workload update` | MAUI, Android, iOS and WASM workloads. |
 | rustup | `rustup` | `rustup update` | Every installed Rust toolchain. |
+| cargo binaries | `cargo`, plus the `cargo-update` crate | `cargo install-update --all` | Every binary `cargo install` put on the machine. Skips naming `cargo install cargo-update` when the subcommand is absent. |
+| Go binaries | `go`, plus `gup` | `gup update` | Every binary `go install` put in `GOBIN`. Skips naming `go install github.com/nao1215/gup@latest` when gup is absent. |
 | GitHub CLI | `gh`, plus a non-empty `gh extension list` | `gh extension upgrade --all` | Installed `gh` extensions. That second check matters, because the upgrade command exits non-zero when nothing is installed. |
 
 ### How it decides who owns a tool

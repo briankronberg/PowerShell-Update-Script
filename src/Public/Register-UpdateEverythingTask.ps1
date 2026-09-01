@@ -135,10 +135,10 @@
         # Passed straight through to the run this task performs, so one machine
         # can carry a daily task that skips a toolchain and a monthly one that
         # updates only that toolchain.
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Git', 'Self', 'Inventory')]
         [string[]] $Tag = @(),
 
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Git', 'Self', 'Inventory')]
         [string[]] $ExcludeTag = @(),
 
         [ValidateSet('Normal', 'Minimized', 'Hidden')]
