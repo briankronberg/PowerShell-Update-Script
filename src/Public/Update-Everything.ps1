@@ -10,49 +10,20 @@
         the rest. Every step writes its own log, and the run ends with a summary
         table and a result object.
 
-        What it drives:
-          - winget: the source indexes, App Installer (winget itself, which
-            "winget upgrade --all" does not reliably cover), then every source
-          - Windows Update via the PSWindowsUpdate module, scanning Microsoft
-            Update rather than Windows Update alone, so Office and other
-            Microsoft products are included
-          - Microsoft 365 Apps via OfficeC2RClient, and Defender signatures
-          - PowerShell modules and help, with PSGallery trusted once
-            (PowerShellGet v2 and PSResourceGet v3) so neither stops on the
-            untrusted-repository prompt
-          - Python (Install Manager), uv, pipx, npm, Chocolatey, Scoop, rustup,
-            dotnet global tools and workloads, GitHub CLI extensions, WSL kernel
-          - PowerShell 7 itself, installed or upgraded through winget in MSI form
-            so it lands in C:\Program Files\PowerShell\7, the path Windows
-            Terminal looks for
-          - Windows Terminal's defaultProfile, pointed at the PowerShell Core
-            profile GUID. Only that one value is changed; the rest of
-            settings.json is preserved
+        Steps cover winget and the Microsoft Store, Windows Update through
+        PSWindowsUpdate, Microsoft 365 Apps, Defender signatures, PowerShell
+        modules and help, Chocolatey, Scoop, Python, uv, pip, pipx, npm, rustup,
+        dotnet, GitHub CLI extensions, the WSL kernel, PowerShell 7 itself and
+        the Windows Terminal default profile. The README lists what each runs.
 
-        How it behaves:
-          - Steps capture every stream (*>&1), not just warnings, so the step log
-            is a complete record. Native stderr surfaces as error records too, and
-            many CLIs write ordinary progress there, so only errors raised by
-            PowerShell itself are counted -- those mark a step 'Warning' rather
-            than 'OK'.
-          - Package managers routinely return non-zero for "nothing to do" or for
-            a partial success. Those codes are enumerated per step rather than
-            being treated as run failures.
-          - $LASTEXITCODE is reset per step, so a cmdlet-only step cannot inherit
-            a stale code from an earlier native command.
-          - Presence of an .exe is not proof a feature is installed. wsl.exe ships
-            in System32 on every Windows 11 machine; Defender cmdlets exist even
-            where a third-party AV has taken over. Both are probed before use.
-          - winget output is localised and its Id column is truncated to the
-            console width, so package presence is decided by exit code, never by
-            text match.
-          - The elevated relaunch passes -Command rather than -File, so typed
-            [bool] parameters survive it.
-          - Step logs and the transcript share one per-run stamp and are pruned by
-            -LogRetentionDays.
-          - The failed-step count is returned rather than exited with, so calling
-            this from a session does not end that session. A scheduled task turns
-            FailedCount into an exit code itself.
+        Presence of an executable is not proof a feature is installed, and package
+        managers routinely return non-zero for "nothing to do", so every step
+        probes before it runs and enumerates its own acceptable exit codes. Steps
+        capture every stream (*>&1); only errors raised by PowerShell itself are
+        counted, and those mark a step Warning rather than OK.
+
+        FailedCount is returned rather than exited with, so calling this from a
+        session does not end that session.
 
         Policy note: winget runs here with --accept-package-agreements, which
         accepts vendor licence agreements on your behalf for every package it
@@ -277,18 +248,14 @@
 
     # State shared with the private helpers is assigned with $script:. Inside a
     # module a plain assignment is function-scoped, so Invoke-Step would read an
-    # unset $script:logDir and fail on every step.
-    #
-    # No hardcoded TLS override: current Windows and PowerShell negotiate TLS
-    # 1.2/1.3 on their own.
+    # unset $script:logDir and fail on every step. TLS is left to the OS.
     $originalOutputEncoding = Initialize-ConsoleEncoding
 
     # ---------------------------------------------------------------------------
     # 1. Logging
     #
-    # Set up before the elevation decision, not after it, so that every way this
-    # run can decline to start -- a standard user, UAC switched off, a host that
-    # cannot be elevated at all -- still leaves a log behind to read.
+    # Set up before the elevation decision, so every way this run can decline to
+    # start still leaves a log behind.
     # ---------------------------------------------------------------------------
     $script:logDir = Get-UpdateLogDirectory
 
@@ -297,15 +264,12 @@
     $script:runStamp = '{0:yyyyMMdd-HHmmss}' -f (Get-Date)
     $mainLog  = Join-Path $logDir "Update-Everything-$runStamp.log"
 
-    # Asked before pruning and before the transcript is started, both of which
-    # would otherwise answer it wrongly: pruning can empty the directory on a
-    # machine that has simply not run in a while, and the transcript would find
-    # its own log and conclude the run had happened before.
+    # Asked before pruning and before the transcript starts: pruning can empty the
+    # directory, and the transcript would find its own log.
     $isFirstRun = -not @(Get-ChildItem -LiteralPath $logDir -Filter 'Update-Everything-*.log' `
         -File -ErrorAction SilentlyContinue).Count
 
-    # Step logs rotate per run rather than being appended to forever, so old ones
-    # (and stale Terminal settings backups) are pruned by age instead.
+    # Step logs rotate per run and are pruned by age, with stale Terminal backups.
     if ($LogRetentionDays -gt 0) {
         $cutoff = (Get-Date).AddDays(-$LogRetentionDays)
         Get-ChildItem -LiteralPath $logDir -File -ErrorAction SilentlyContinue |
@@ -313,8 +277,8 @@
             Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
-    # A transcript is a nice-to-have, not a prerequisite: it fails if one is already
-    # running or the path is not writable, and that must not kill the run.
+    # A transcript is a nice-to-have: it fails if one is already running or the
+    # path is not writable, and that must not kill the run.
     $transcriptRunning = $false
     try {
         Start-Transcript -Path $mainLog -Append -ErrorAction Stop | Out-Null
@@ -325,13 +289,11 @@
 
     $script:isAdmin = Test-IsAdministrator
     if (-not $isAdmin -and -not $SkipElevation) {
-        # Ask whether elevation is possible before asking for it. Without this the
-        # script raises a UAC prompt a standard user can never satisfy, and reports
-        # the refusal as though the user had declined it.
+        # Ask whether elevation is possible before asking for it, or a standard user
+        # gets a UAC prompt they can never satisfy, reported as their refusal.
         $elevation = Test-ElevationCapability
 
-        # Said before the attempt, so that a prompt which is then refused reads
-        # as the thing that was warned about rather than as a surprise.
+        # Said before the attempt, so a refused prompt reads as the warned-about thing.
         if ($elevation.Caution) { Write-Warning $elevation.Caution }
 
         if (-not $elevation.CanElevate) {
@@ -345,20 +307,12 @@
                 -LogDirectory $logDir -MainLog $mainLog)
         }
 
-        # Close the transcript before handing off, and reopen it afterwards to
-        # record the outcome.
+        # Close the transcript before handing off and reopen it afterwards. The child
+        # starts its own; stamps have one-second resolution, so two open on the same
+        # path would have -Append report success and lose the child's content.
         #
-        # The child computes its own run stamp and starts its own transcript.
-        # Stamps have one-second resolution, so two starting in the same second
-        # resolve to the same path, and two processes holding it open is not
-        # benign: -Append reports success and the child's content is then lost.
-        # A child needs long enough to start and import that the stamps differ in
-        # practice, but not overlapping costs nothing and does not rely on that
-        # margin holding on faster hardware.
-        #
-        # The note is written before the close, not after. If the elevated child
-        # hangs, this transcript is all there is, and it has to name the log the
-        # real work went to.
+        # The note is written before the close: if the child hangs, this transcript is
+        # all there is, and it has to name the log the real work went to.
         $childNote = "Handing off to an elevated run. Its transcript is a separate Update-Everything-*.log in $logDir, stamped when it starts."
         Write-Host $childNote -ForegroundColor Yellow
 
@@ -367,8 +321,8 @@
             $transcriptRunning = $false
         }
 
-        # A module function must not kill the session it was called from, so the
-        # elevated child's outcome comes back as a result rather than an exit.
+        # A module function must not kill its caller's session, so the child's outcome
+        # comes back as a result rather than an exit.
         $child = Invoke-SelfElevation -BoundParameters $PSBoundParameters
 
         try {
@@ -392,13 +346,12 @@
         Write-Warning 'Running without administrator rights. Steps that require admin will be skipped and listed in the summary.'
     }
 
-    # Offer a way out before anything is touched. This sits after the transcript
-    # starts, so the decision is on record, and before the notification and
-    # install checks, so skipping costs nothing.
+    # Offer a way out before anything is touched: after the transcript starts so the
+    # decision is on record, before the install checks so skipping costs nothing.
     if ($PromptBeforeRun) {
         if (-not (Test-CanPrompt)) {
-            # A hidden window or redirected input cannot answer. Starting anyway
-            # beats blocking until the task's time limit kills the run.
+        # A hidden window or redirected input cannot answer, and starting anyway beats
+        # blocking until the task time limit kills the run.
             Write-Warning 'PromptBeforeRun was requested, but this run cannot prompt (no interactive console, or input is redirected). Starting immediately.'
         } else {
             switch (Request-RunDecision -TimeoutSeconds $PromptTimeoutSeconds -DelayMinutes $DelayMinutes) {
@@ -423,9 +376,8 @@
     # about at most once.
     $script:InstallDecision = @{}
 
-    # Resolved before any work starts, so a missing prerequisite is reported at
-    # the top of the transcript rather than after the run it was meant to report
-    # on, and so BurntToast is installed before rather than afterwards.
+    # Resolved before any work starts, so a missing prerequisite is reported at the
+    # top of the transcript and BurntToast is installed before it is needed.
     $script:NotificationsAvailable = $false
     $notificationStatus = $null
     if ($Notify) {
@@ -435,9 +387,8 @@
 
     $script:Results = [System.Collections.Generic.List[object]]::new()
 
-    # Read by Invoke-Step, which decides per step. Held at script scope for the
-    # same reason as $script:isAdmin: a step action runs inside Invoke-Step, not
-    # here.
+    # Read by Invoke-Step, which decides per step. Script scope for the same reason
+    # as $script:isAdmin: a step action runs inside Invoke-Step, not here.
     $script:TagFilter        = $Tag
     $script:ExcludeTagFilter = $ExcludeTag
 
@@ -453,13 +404,9 @@
     #   0x8A150014 (-1978335212) APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
     $WingetNothingToDo = @(-1978335189, -1978335212)
 
-    # The version that produced this log. Nothing else in a run said it, so a
-    # transcript could not be read against the code that made it -- a step that
-    # failed two releases ago looked identical to one failing now.
-    #
-    # The running version, from the module executing this, not the highest
-    # installed. A session imported by path, or one that loaded before an update
-    # replaced the files, is running something else.
+    # The version that produced this log, so a transcript can be read against the
+    # code that made it. The running module, not the highest installed: a session
+    # imported by path, or loaded before an update, is running something else.
     $script:RunningVersion = $MyInvocation.MyCommand.Module.Version
 
     Write-Host "Maintenance run started $(Get-Date)  |  Admin: $isAdmin  |  Main Log: $mainLog" -ForegroundColor Green
@@ -478,10 +425,8 @@
         Write-Output "$($present.Count) of $($inventory.Count) tools present."
         Write-Output ''
 
-        # Aligned by hand rather than with Format-Table. Inside a step action the
-        # output has to reach the pipeline so Invoke-Step can capture it for the
-        # step log, and Format-Table's records would only render correctly on
-        # their way to a host -- which is the one place a step must not write.
+        # Aligned by hand: inside a step action the output has to reach the pipeline
+        # for Invoke-Step to capture, and Format-Table records only render to a host.
         $nameWidth = 0
         $ownerWidth = 0
         foreach ($tool in $present) {
@@ -498,20 +443,16 @@
             Write-Output 'Their steps report Skipped, which is the expected result rather than a fault.'
         }
 
-        # The module's own version, compared against the gallery. Here rather than
-        # in the banner because it costs a network call: a scheduled run on a
-        # machine with no network should not pay a timeout before it starts, and
-        # -ExcludeTag Inventory already turns this off for one that does not want
-        # it.
+        # Compared against the gallery here rather than in the banner because it costs
+        # a network call, and -ExcludeTag Inventory turns it off.
         if ($script:RunningVersion) {
             Write-Output ''
             Write-Output (Format-SelfVersionStatus -Running $script:RunningVersion `
                 -Status (Get-GalleryModuleStatus -Name 'UpdateEverything'))
         }
 
-        # More than one executable of a name on PATH means the version above is
-        # the one that runs and the others are updated by nobody. It is also how
-        # a tool ends up updated by a manager that does not own the copy in use.
+        # More than one executable of a name on PATH means the first runs and the rest
+        # are updated by nobody, or by a manager that does not own the copy in use.
         $duplicated = @($present | Where-Object { $_.Copies -gt 1 })
         if ($duplicated.Count) {
             Write-Output ''
@@ -533,8 +474,8 @@
                     Write-Output "UpdateEverything $($status.Installed) is installed; the gallery could not be asked about it."
                 } elseif (-not $status.Updatable) {
                     # A copy the GitHub installer put there was not installed by
-                    # PowerShellGet, so Update-Module refuses it. That is not a
-                    # fault, and -UpdateSelfSource Main is the matching path.
+                    # PowerShellGet, so Update-Module refuses it. -UpdateSelfSource
+                    # Main is the matching path.
                     Write-Output "UpdateEverything $($status.Installed) was not installed from the gallery, so Update-Module cannot move it. The published version is $($status.Available)."
                     Write-Output 'Use -UpdateSelfSource Main to track the branch it came from, or Install-Module UpdateEverything -Force to switch to the gallery copy.'
                 } elseif (-not $status.NeedsUpdate) {
@@ -547,10 +488,8 @@
                 return
             }
 
-            # Main. Reinstalls whether or not the version differs, because the
-            # module version does not move with every commit: "already 1.0.0" is
-            # the normal state of an out-of-date working copy, so a version
-            # check cannot decide whether a reinstall is needed.
+            # Main. Reinstalls regardless of version: the module version does not move
+            # with every commit, so a version check cannot decide this.
             $uri = 'https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Install.ps1'
             $installer = Join-Path ([System.IO.Path]::GetTempPath()) "Install-UpdateEverything-$script:runStamp.ps1"
 
@@ -559,19 +498,17 @@
                 Invoke-WebRequest -Uri $uri -OutFile $installer -UseBasicParsing -ErrorAction Stop
                 Unblock-File -LiteralPath $installer -ErrorAction SilentlyContinue
 
-                # In a child process, and powershell rather than the current
-                # host: the installer imports the module when it finishes, which
-                # inside this session would re-import a module whose files have
-                # just been replaced under it. powershell.exe is also always
-                # present, which pwsh is not.
+                # A child process, and powershell rather than the current host: the
+                # installer imports the module when it finishes, which here would
+                # re-import files replaced underneath it. powershell.exe is always
+                # present; pwsh is not.
                 & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $installer -Force
                 if ($LASTEXITCODE -ne 0) {
                     throw "The installer exited with code $LASTEXITCODE."
                 }
 
-                # Unlike winget, which is a fresh process every step, this module
-                # is already loaded: the functions running now stay on the code
-                # in memory however new the files on disk are.
+                # This module is already loaded, so the functions running now stay on
+                # the code in memory however new the files on disk are.
                 Write-Output 'Updated. The new version loads on the next run; this one continues on the code already in memory.'
             } finally {
                 Remove-Item -LiteralPath $installer -Force -ErrorAction SilentlyContinue
@@ -585,8 +522,8 @@
     # 2. winget (apps from winget + Microsoft Store sources)
     # ---------------------------------------------------------------------------
     Invoke-Step -Name 'winget self-update' -RequiresCommand 'winget' -Tag 'Windows', 'PackageManager' -Action {
-        # Refresh the source indexes first. A stale index makes 'upgrade --all'
-        # quietly miss packages rather than fail loudly, so this is not just hygiene.
+        # Refresh the indexes first. A stale index makes upgrade --all quietly miss
+        # packages rather than fail loudly.
         winget source update --disable-interactivity
         if ($LASTEXITCODE -ne 0) {
             Write-Output "winget source update returned $LASTEXITCODE; continuing (a stale index is not fatal)."
@@ -604,12 +541,9 @@
     }
 
     Invoke-Step -Name 'winget (all sources)' -RequiresCommand 'winget' -Tag 'Windows', 'PackageManager' -Action {
-        # Accumulated and passed through in one pass, rather than captured and
-        # echoed afterwards. A winget upgrade can run for minutes and the console
-        # should show it happening.
-        #
-        # The upgrade table winget prints first is the "before" list, so no extra
-        # call is needed for it.
+        # Passed through in one pass rather than echoed afterwards, because a winget
+        # upgrade runs for minutes and the console should show it happening. The
+        # table winget prints first is the "before" list.
         $captured = [System.Collections.Generic.List[string]]::new()
 
         winget upgrade --all --include-unknown --silent `
@@ -619,16 +553,13 @@
         $code = $LASTEXITCODE
         $global:LASTEXITCODE = 0
 
-        # 'upgrade --all' returns non-zero for entirely routine reasons: nothing
-        # applicable, or a subset of packages (pinned, Store-sourced, or currently
-        # running) failing while the rest upgrade fine. Report the code instead of
-        # failing the run over it; Write-Error marks the step 'Warning'.
+        # upgrade --all returns non-zero for routine reasons: nothing applicable, or a
+        # subset (pinned, Store-sourced, running) failing while the rest succeed.
+        # Report the code rather than failing the run; Write-Error marks it Warning.
         if ($code -ne 0 -and $WingetNothingToDo -notcontains $code) {
 
-            # Which ones, and whether anything can be done about them. The exit
-            # code says only that something did not upgrade, and a person then
-            # has to read the step log to find out what -- or, as happened,
-            # notice across two runs that one package never moves.
+            # Which ones, and whether anything can be done. The exit code says only
+            # that something did not upgrade.
             $text = $captured -join "`n"
             $before = @(Get-WingetUpgradeTable -Text $text)
             $after = @(Get-WingetUpgradeTable -Text (
@@ -648,9 +579,8 @@
                 }
             }
 
-            # Written as information rather than as a problem. These do not
-            # change until the vendor ships something that applies, so a person
-            # who reads them as failures learns to skim past the ones that are.
+            # Information, not a problem: these do not change until the vendor ships
+            # something applicable, and reading them as failures teaches skimming.
             if ($skipped.Count) {
                 Write-Output ''
                 Write-Output 'Not upgradable on this machine, and expected to stay that way:'
@@ -659,9 +589,8 @@
                 }
             }
 
-            # The error, and so the Warning status, is raised only for something
-            # that was actually tried. A package winget declined is not a fault
-            # of this run and must not colour it.
+            # Raised only for something actually tried. A package winget declined is
+            # not a fault of this run.
             if ($attempted.Count) {
                 Write-Error ('winget could not upgrade {0} package(s): {1}. Exit code {2} (0x{2:X8}).' -f
                     $attempted.Count, (($attempted.Id) -join ', '), $code)
@@ -678,11 +607,8 @@
 
     # ---------------------------------------------------------------------------
     # A manager runs before the tools it may own. Chocolatey and Scoop install
-    # language toolchains, so updating uv or npm first and the manager that owns
-    # it second updates a tool and then the thing responsible for it. The
-    # toolchain steps ask Get-ToolInstallSource before self-updating, so this is
-    # sequence rather than a live conflict -- but the sequence should read the
-    # way the dependency runs.
+    # language toolchains, so updating uv or npm first would update a tool before
+    # the thing responsible for it.
     # ---------------------------------------------------------------------------
     # 2b. Chocolatey and Scoop, before the toolchains they may own
     # ---------------------------------------------------------------------------
@@ -693,8 +619,7 @@
     }
 
     Invoke-Step -Name 'Scoop' -RequiresCommand 'scoop' -Tag 'PackageManager' -Action {
-        # Run the three phases independently: a failure in one (a broken bucket, an
-        # app that will not clean up) should not hide the others.
+        # Three phases independently: a failure in one should not hide the others.
         $phases = @(
             @{ Label = 'scoop update (scoop itself + buckets)'; Args = @('update') },
             @{ Label = 'scoop update * (installed apps)';       Args = @('update', '*') },
@@ -719,9 +644,8 @@
             $id  = 'Microsoft.PowerShell'
             $exe = Join-Path $env:ProgramFiles 'PowerShell\7\pwsh.exe'
 
-            # Decide by exit code, not by matching text: winget localises its output
-            # and truncates the Id column to the console width, so a string match
-            # gives false negatives in a narrow window. 0 = found.
+            # By exit code, not text: winget localises output and truncates the Id
+            # column to the console width. 0 = found.
             winget list --id $id --exact --accept-source-agreements --disable-interactivity
             $isInstalled = ($LASTEXITCODE -eq 0)
             $global:LASTEXITCODE = 0
@@ -761,11 +685,9 @@
                 if ($LASTEXITCODE -ne 0) { $global:LASTEXITCODE = 0 }
                 Write-Output "Installed pwsh version: $reported"
             } else {
-                # The install branch forces --installer-type wix, but the upgrade
-                # branch cannot convert a PowerShell that is already packaged, so
-                # say what it costs and how to switch. An MSIX pwsh works fine for
-                # everything except elevating and being named in a scheduled task,
-                # which are two things this module needs.
+                # The upgrade branch cannot convert an already-packaged PowerShell, so
+                # say what it costs. An MSIX pwsh works for everything except elevating
+                # and being named in a scheduled task, which this module needs.
                 Write-Output "Note: $exe not found, so PowerShell 7 here is the MSIX package. It runs normally, but Windows will not elevate it and its path changes at every update, so scheduled tasks cannot rely on it."
                 Write-Output 'To switch: winget install --id Microsoft.PowerShell --exact --source winget --installer-type wix'
             }
@@ -779,10 +701,8 @@
     # ---------------------------------------------------------------------------
     Invoke-Step -Name 'Microsoft 365 Apps' -Tag 'Microsoft' -Action {
         $roots = @($env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ }
-        # Indexed rather than "| Select-Object -First 1": that stops the upstream
-        # pipeline, and inside a step -- where every stream is merged with *>&1 --
-        # the transcript records the stop as 'TerminatingError(): "The pipeline has
-        # been stopped."'. Nothing is wrong, but it reads as though something is.
+        # Indexed rather than Select-Object -First 1, which stops the upstream pipeline
+        # and has *>&1 record "TerminatingError(): The pipeline has been stopped."
         $found = @($roots |
             ForEach-Object { Join-Path $_ 'Common Files\Microsoft Shared\ClickToRun\OfficeC2RClient.exe' } |
             Where-Object { Test-Path -LiteralPath $_ })
@@ -792,9 +712,8 @@
             Stop-StepAsSkipped -Reason 'OfficeC2RClient.exe is not present, so there is no click-to-run Office install'
         }
 
-        # The same action as the "Update Now" button, minus the prompts. C2R hands
-        # the work to its background service and returns immediately, so exit 0 here
-        # means "update requested", not "update applied".
+        # The "Update Now" button without the prompts. C2R hands the work to its
+        # background service and returns, so exit 0 means requested, not applied.
         & $c2r /update user updatepromptuser=false displaylevel=false
         if ($LASTEXITCODE -ne 0) {
             Write-Output "OfficeC2RClient returned $LASTEXITCODE; the update request may not have been accepted."
@@ -806,12 +725,10 @@
     # ---------------------------------------------------------------------------
     # 3. PowerShell repository trust, modules + help
     # ---------------------------------------------------------------------------
-    # PSGallery ships as "Untrusted", so every module install/update stops on the
-    # "You are installing the modules from an untrusted repository" prompt.
-    # -ErrorAction SilentlyContinue does NOT suppress that: it is a confirmation
-    # prompt, not an error. Trust is stored per-user under LOCALAPPDATA, and UAC
-    # elevation keeps the same user profile, so setting it once here sticks for
-    # both the elevated and the non-elevated run.
+    # PSGallery ships Untrusted, so every module install stops on a confirmation
+    # prompt that -ErrorAction SilentlyContinue does not suppress. Trust is stored
+    # per-user under LOCALAPPDATA, and UAC keeps the same profile, so setting it
+    # once here covers both the elevated and non-elevated run.
     Invoke-Step -Name 'Trust PSGallery' -Tag 'PowerShell' -Action {
         # PowerShellGet v2 pulls the NuGet provider on first use and prompts for it.
         if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
@@ -850,17 +767,14 @@
             }
         }
 
-        # This step sets trust and stops there. Moving PowerShellGet itself
-        # forward belongs to the Gallery tooling step below, which handles the
-        # 1.0.0.1 Windows ships as one case of a general rule rather than as a
-        # version comparison of its own.
+        # Trust only. Moving PowerShellGet forward belongs to the Gallery tooling step,
+        # which handles the 1.0.0.1 Windows ships as one case of a general rule.
     }
 
-    # The tooling every other gallery step runs on. It is bootstrapped above when
-    # missing, but nothing until now brought it forward once present, so a
-    # machine could carry a years-old NuGet provider or a PowerShellGet 2.1 for
-    # as long as it lived. This runs before 'PowerShell modules' because that
-    # step is one of the things that depends on it.
+    # The tooling every other gallery step runs on. Bootstrapped above when missing,
+    # but nothing brought it forward once present, so a machine could carry a
+    # years-old provider for as long as it lived. Runs before PowerShell modules,
+    # which depends on it.
     Invoke-Step -Name 'Gallery tooling' -Tag 'PowerShell' -Action {
         # Not admin-gated, and -Scope AllUsers fails without elevation, so the
         # scope follows what the run actually has.
@@ -868,12 +782,9 @@
 
         # --- NuGet package provider ------------------------------------------
         #
-        # There is no Update-PackageProvider; Install-PackageProvider is the only
-        # way to move one forward. That makes the refresh an install command
-        # fetching a binary provider assembly, so it asks under the same
-        # 'NuGetProvider' component as the bootstrap rather than proceeding on
-        # the grounds that something is already there. Declining is not fatal:
-        # the provider that is present keeps working.
+        # There is no Update-PackageProvider; Install-PackageProvider is the only way
+        # forward, so the refresh is an install command fetching a binary assembly and
+        # asks under the same NuGetProvider component. Declining is not fatal.
         $nuget = @(Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue |
             Sort-Object Version -Descending)
         if (-not $nuget.Count) {
@@ -883,23 +794,18 @@
 
             # SilentlyContinue and a check, not Stop and a catch. PowerShell 7
             # registers no provider bootstrap source, so this cannot be answered
-            # there at all -- the normal, healthy case on half the supported
-            # hosts. Start-Transcript records a terminating error whether or not
-            # it is caught, so throwing for the expected answer puts
-            # "TerminatingError(Find-PackageProvider)" in the middle of a step
-            # that went on to report the right thing.
-            #
-            # Test-PendingReboot uses SilentlyContinue with Get-ItemProperty
-            # for the same reason.
+            # there at all. Start-Transcript records a terminating error whether or
+            # not it is caught, which would put "TerminatingError(Find-PackageProvider)"
+            # in a step that went on to report the right thing. Test-PendingReboot
+            # uses SilentlyContinue with Get-ItemProperty for the same reason.
             $newest = $null
             try {
                 $candidates = @(Find-PackageProvider -Name NuGet -ErrorAction SilentlyContinue |
                     Sort-Object Version -Descending)
                 if ($candidates.Count) { $newest = $candidates[0].Version }
             } catch {
-                # A backstop. With SilentlyContinue the absent-provider case
-                # returns nothing instead of throwing, so reaching here means a
-                # hard failure.
+                # A backstop: SilentlyContinue returns nothing for the absent-provider
+                # case, so reaching here means a hard failure.
                 Write-Verbose "Asking for the newest NuGet provider failed outright: $($_.Exception.Message)"
             }
 
@@ -919,18 +825,14 @@
 
         # --- PowerShellGet and PSResourceGet ---------------------------------
         #
-        # Three cases, and they are not the same decision:
-        #
         #   absent                  an install, and asks
-        #   present but not ours    a copy the host shipped. Update-Module
-        #                           refuses it, so moving it forward is a
-        #                           side-by-side install, and asks
+        #   present but not ours    a shipped copy; Update-Module refuses it, so
+        #                           moving it forward is a side-by-side install,
+        #                           and asks
         #   present and ours        an update, and does not ask
         #
-        # The middle case is why the version alone is not the test. Windows
-        # PowerShell ships PowerShellGet 1.0.0.1 under Program Files rather than
-        # $PSHOME, and Update-Module answers "Module 'PowerShellGet' was not
-        # installed by using Install-Module, so it cannot be updated".
+        # Windows PowerShell ships PowerShellGet 1.0.0.1 under Program Files and
+        # Update-Module refuses it, so the version alone is not the test.
         foreach ($tool in @(
                 @{ Module = 'PowerShellGet';                      Component = 'PowerShellGet' }
                 @{ Module = 'Microsoft.PowerShell.PSResourceGet'; Component = 'PSResourceGet' }
@@ -957,9 +859,8 @@
                     Update-Module -Name $name -Force -Confirm:$false -ErrorAction Stop
                 }
 
-                # The same trap as -UpdateSelf: the module is already loaded, so
-                # the files on disk are replaced and the cmdlets running now stay
-                # on the code in memory.
+                # The same trap as -UpdateSelf: the module is loaded, so the files on
+                # disk are replaced and the cmdlets running now stay on memory.
                 Write-Output "$name updated. It loads in the next session; this run continues on the version already in memory."
                 continue
             }
@@ -991,9 +892,8 @@
         Add-SkippedStep -Name 'PowerShell modules'
     } else {
     Invoke-Step -Name 'PowerShell modules' -Tag 'PowerShell' -Action {
-        # Both update commands are silent on success, so the step reported OK and
-        # a duration and nothing else. Taken either side of the pass, this says
-        # what actually moved.
+        # Both update commands are silent on success, so the step reported only OK
+        # and a duration. Taken either side of the pass, this says what moved.
         $before = Get-ModuleVersionMap
 
         if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
@@ -1015,9 +915,9 @@
                 ErrorAction = 'SilentlyContinue'
             }
 
-            # PowerShellGet 1.0.0.1 -- the version Windows PowerShell ships -- has
-            # no -AcceptLicense, and splatting a parameter that does not exist is
-            # a terminating error, which would fail this step outright on 5.1.
+            # PowerShellGet 1.0.0.1, which Windows PowerShell ships, has no
+            # -AcceptLicense, and splatting a parameter that does not exist is a
+            # terminating error that would fail this step on 5.1.
             if (Test-ParameterSupport -Command 'Update-Module' -Parameter 'AcceptLicense') {
                 $p.AcceptLicense = $true
             } else {
@@ -1070,18 +970,16 @@
     # 4. Python toolchain
     # ---------------------------------------------------------------------------
     Invoke-Step -Name 'Python (Install Manager)' -Tag 'Python' -Action {
-        # Reported as skipped rather than OK. A step that did nothing because
-        # the tool is absent is not the same as a step that updated something,
-        # and the summary should not read as though Python were handled.
+        # Skipped rather than OK: a step that did nothing because the tool is absent
+        # is not a step that updated something.
         if     (Get-Command pymanager -ErrorAction SilentlyContinue) { pymanager install --update }
         elseif (Get-Command py        -ErrorAction SilentlyContinue) { py install --update }
         else   { Stop-StepAsSkipped -Reason 'the Python Install Manager is not installed' }
     }
 
     Invoke-Step -Name 'uv' -RequiresCommand 'uv' -Tag 'Python' -Action {
-        # Self-update only what nothing else is managing. Running "uv self
-        # update" against a uv that scoop or winget installed fights whichever
-        # one owns it, and that manager's own step will update it anyway.
+        # Self-update only what nothing else manages. "uv self update" against a uv
+        # that scoop or winget installed fights whichever owns it.
         $owner = Get-ToolInstallSource -Name 'uv'
         if ($owner -notin 'Standalone', 'Unknown') {
             Stop-StepAsSkipped -Reason "uv is managed by $owner, which updates it in its own step"
@@ -1091,9 +989,8 @@
         $output
 
         if ($LASTEXITCODE -ne 0) {
-            # uv refuses to self-update when a package manager owns it, and says
-            # so in its output. That is correct behaviour rather than a failed
-            # run. Any other non-zero exit is reported as a real failure.
+            # uv refuses to self-update when a package manager owns it and says so in
+            # its output, which is correct rather than failed. Any other non-zero is.
             if (($output | Out-String) -match 'package manager|self-update.*(disabled|unavailable)') {
                 Write-Output 'uv declined to self-update because something else manages it.'
                 $global:LASTEXITCODE = 0
@@ -1105,9 +1002,8 @@
     }
 
     Invoke-Step -Name 'pip' -Tag 'Python' -Action {
-        # Never inside an active virtual environment. Its packages belong to
-        # whatever project made it, not to this machine, and it is both the
-        # easiest interpreter to reach from here and the worst one to change.
+        # Never inside an active virtual environment: its packages belong to whatever
+        # project made it, and it is the easiest interpreter to reach from here.
         if ($env:VIRTUAL_ENV) {
             Stop-StepAsSkipped -Reason "a virtual environment is active ($env:VIRTUAL_ENV), and its packages belong to that project rather than to this machine"
         }
@@ -1130,9 +1026,8 @@
         }
         Write-Output $version
 
-        # python -m pip, never the bare pip.exe. On Windows pip cannot replace
-        # its own running executable, so "pip install --upgrade pip" fails on a
-        # locked file; run through the interpreter and the exe is not running.
+        # python -m pip, never the bare pip.exe. On Windows pip cannot replace its
+        # own running executable, so run it through the interpreter instead.
         & $interpreter -m pip install --upgrade pip --disable-pip-version-check
         if ($LASTEXITCODE -ne 0) {
             Write-Error "Could not upgrade pip for $interpreter (exit $LASTEXITCODE). pip's own message is in this step's log."
@@ -1142,9 +1037,8 @@
             $global:LASTEXITCODE = 0
         }
 
-        # Only this interpreter's pip. The others are named rather than touched:
-        # upgrading pip in every Python on a machine is a larger claim than a
-        # maintenance run should make on its own.
+        # Only this interpreter's pip. Upgrading pip in every Python on a machine is
+        # a larger claim than a maintenance run should make.
         $others = @(py --list 2>&1 | Out-String -Stream | Where-Object { $_ -match '^\s*-V:' -and $_ -notmatch '\*' })
         $global:LASTEXITCODE = 0
         if ($others.Count) {
@@ -1153,11 +1047,9 @@
             $others | ForEach-Object { Write-Output "  $($_.Trim())" }
         }
 
-        # Installed packages are deliberately left alone. pip has no upgrade-all,
-        # and list-outdated-then-upgrade-each does not keep the dependency set
-        # consistent -- upgrading one package can silently downgrade another's
-        # dependency. That is the problem pipx and uv exist to avoid, and both
-        # have their own steps.
+        # Installed packages are left alone. pip has no upgrade-all, and upgrading
+        # each outdated package can silently downgrade another's dependency -- the
+        # problem pipx and uv exist to avoid, and both have their own steps.
     }
 
     Invoke-Step -Name 'pipx packages' -RequiresCommand 'pipx' -Tag 'Python' -Action {
@@ -1168,19 +1060,17 @@
     # 5. Node / npm
     # ---------------------------------------------------------------------------
     Invoke-Step -Name 'npm' -RequiresCommand 'npm' -Tag 'Node' -Action {
-        # npm writes progress and deprecation notices to stderr as a matter of course,
-        # so judge it by exit code only.
-        # Output is captured as well as passed through, because the reason npm failed
-        # is usually in it.
+        # npm writes progress and deprecation notices to stderr as a matter of
+        # course, so judge it by exit code. Output is captured as well as passed
+        # through, because the reason npm failed is usually in it.
         $npmOutput = npm install -g npm@latest 2>&1
         $npmOutput
         if ($LASTEXITCODE -ne 0) {
             $npmText = $npmOutput | Out-String
 
             # EBADENGINE means the newest npm does not support the installed Node,
-            # which is a fact about this machine rather than a fault in the
-            # update. Reported in full, because the bare exit code does not say
-            # which of the two it is.
+            # which is a fact about this machine. Reported in full, because the bare
+            # exit code does not say which it is.
             if ($npmText -match 'EBADENGINE') {
                 $nodeVersion = try { node --version 2>$null } catch { 'unknown' }
                 Write-Error ("npm could not update itself: the latest npm does not support the installed Node.js ($nodeVersion). " +
@@ -1207,9 +1097,9 @@
     # 6. .NET global tools
     # ---------------------------------------------------------------------------
     Invoke-Step -Name '.NET global tools' -RequiresCommand 'dotnet' -Tag 'DotNet' -Action {
-        # 'dotnet' exists for runtime-only installs too, and 'dotnet --version' fails
-        # outright when there is no SDK or when a global.json pins a missing one.
-        # Validate the string before casting it to an int.
+        # dotnet exists for runtime-only installs, and "dotnet --version" fails when
+        # there is no SDK or a global.json pins a missing one, so validate the
+        # string before casting it.
         $verRaw = (@(dotnet --version 2>&1)[0] | Out-String).Trim()
         $verOk  = ($LASTEXITCODE -eq 0)
         $global:LASTEXITCODE = 0
@@ -1312,9 +1202,8 @@
     # 9. Microsoft Defender signatures
     # ---------------------------------------------------------------------------
     Invoke-Step -Name 'Defender signatures' -RequiresCommand 'Update-MpSignature' -RequiresAdmin -Tag 'Windows', 'Microsoft' -Action {
-        # The Defender cmdlets are present even on machines where a third-party AV has
-        # taken over and the antimalware service is off. Probe before updating so that
-        # a managed device does not report a failed step every run.
+        # The Defender cmdlets exist even where a third-party AV has taken over and
+        # the service is off, so probe before updating.
         try {
             $mp = Get-MpComputerStatus -ErrorAction Stop
         } catch {
@@ -1378,10 +1267,9 @@
 
             Import-Module PSWindowsUpdate -ErrorAction Stop
 
-            # Windows Update alone offers the OS and drivers. Registering the
-            # Microsoft Update service widens the scan to Office and other
-            # Microsoft products. Managed devices often block this by policy, so
-            # degrade to a Windows-Update-only scan rather than failing the step.
+            # Windows Update alone offers the OS and drivers; registering Microsoft
+            # Update widens the scan to Office. Managed devices often block this by
+            # policy, so degrade rather than fail.
             $useMicrosoftUpdate = $false
             $muServiceId = '7971f918-a847-4430-9279-4a52d1efe18d'
             try {

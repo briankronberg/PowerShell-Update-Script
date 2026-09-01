@@ -5,28 +5,22 @@ function Get-GalleryModuleStatus {
         the PowerShell Gallery.
 
         .DESCRIPTION
-        Returns Installed, Available and NeedsUpdate.
+        Returns Installed, Available, Updatable and NeedsUpdate.
 
-        Installed is $null when the module is not on the machine at all, which is
-        a different answer from "installed but old" and the caller acts on it
-        differently: one is an install and needs consent, the other is an update
-        and does not.
+        Installed is $null when the module is absent, which is an install and
+        needs consent, rather than an update, which does not.
 
-        Available is $null when the gallery could not be reached. NeedsUpdate is
-        then $false, so a network failure presents as "cannot tell" rather than
-        as a reason to reinstall. It never reports an update as available for a
-        module that is not installed.
+        Available is $null when the gallery could not be reached, and NeedsUpdate
+        is then $false, so a network failure presents as "cannot tell" rather
+        than as a reason to reinstall. An update is never reported for a module
+        that is not installed.
 
-        Updatable reports whether Update-Module can move this copy forward at
-        all. It refuses anything it did not install -- "Module 'X' was not
-        installed by using Install-Module, so it cannot be updated" -- which
-        covers every module that shipped with the host, wherever it sits.
-        Windows PowerShell ships PowerShellGet 1.0.0.1 under Program Files
-        rather than $PSHOME, so the path is not the test; whether PowerShellGet
-        recorded the install is.
-
-        A shipped copy is not stuck, but moving it forward is a side-by-side
-        install rather than an update, and so it is an install decision.
+        Updatable reports whether Update-Module can move this copy forward. It
+        refuses anything it did not install, which covers every module that
+        shipped with the host. Windows PowerShell ships PowerShellGet 1.0.0.1
+        under Program Files rather than $PSHOME, so the path is not the test;
+        whether PowerShellGet recorded the install is. Moving a shipped copy
+        forward is a side-by-side install, and so an install decision.
 
         .EXAMPLE
         Get-GalleryModuleStatus -Name PowerShellGet

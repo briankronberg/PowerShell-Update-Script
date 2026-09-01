@@ -298,7 +298,7 @@ called out of date.
 quickest way to see why a run skipped what it skipped:
 
 ```
-9 of 14 tools present.
+10 of 15 tools present.
 
   winget           Unknown     v1.29.290
   PowerShell 7     Unknown     PowerShell 7.6.5
@@ -344,8 +344,8 @@ rest, a package manager's own inventory decides.
 ### When winget leaves something behind
 
 `winget upgrade --all` returns one exit code for the whole pass, so a partial
-failure used to say only that *something* did not upgrade. The step now names
-them, and separates the two cases:
+failure says only that *something* did not upgrade. The step names them, and
+separates the two cases:
 
 ```
 Still out of date after this run:
@@ -376,6 +376,7 @@ it declined is not a fault of the run and does not colour it.
 | PowerShell 7 | winget, forced to the MSI package with `--installer-type wix`. It installs only with your consent and upgrades in place when it is already there. |
 | PowerShell modules from the Gallery | `Update-PSResource -Name *` where PSResourceGet exists, otherwise `Update-Module`. |
 | PowerShell help | `Update-Help`, pinned to `en-US` under any other UI culture, where most modules publish no help at all. |
+| PowerShell Gallery tooling | `PowerShellGet`, `PSResourceGet` and the NuGet package provider, which every other gallery step runs on. A copy the host shipped cannot be updated in place, so moving it forward is a side-by-side install and asks first. |
 | WSL, both the Linux kernel and the platform | `wsl --update`, once `wsl --status` confirms WSL is enabled. `wsl.exe` ships on every Windows 11 machine, so finding it proves nothing. |
 | winget itself, packaged as App Installer | It asks for App Installer by ID, because `upgrade --all` does not reliably update the tool running the upgrade. |
 | Windows Terminal | Not an update. It can set PowerShell 7 as the default profile, backing up `settings.json` first. |
@@ -397,6 +398,7 @@ choose the packages; the manager's own inventory does.
 | Chocolatey | `choco` | `choco upgrade all -y` | Everything installed as a Chocolatey package. Exit codes 1641 and 3010 pass, since those are the MSI "reboot required" codes rather than failures. |
 | Scoop | `scoop` | `scoop update`, `scoop update *`, `scoop cleanup *`, each run on its own | Scoop, its buckets, installed apps, then old versions. The phases run separately so a broken bucket cannot hide the rest. |
 | npm | `npm` | `npm install -g npm@latest`, then `npm update -g` only with `-UpdateGlobalNpm` | npm itself, every run. Global packages only on request, because upgrading them can move a pinned toolchain. |
+| pip | `python`, else `py` | `python -m pip install --upgrade pip` | pip itself, for the interpreter that resolves on `PATH`. Installed packages are left alone -- see [Python](#python). |
 | pipx | `pipx` | `pipx upgrade-all` | Every Python application pipx installed. |
 | uv | `uv`, plus an ownership check | `uv self update` | uv itself, and only when nothing else owns it. |
 | Python Install Manager | `pymanager`, else `py` | `pymanager install --update` | Installed Python runtimes. |

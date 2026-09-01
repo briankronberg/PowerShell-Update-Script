@@ -6,23 +6,19 @@ function Get-WingetLeftover {
         .DESCRIPTION
         "winget upgrade --all" returns one exit code for the whole pass, so a
         partial failure says only that something did not upgrade. This says
-        which, and separates two outcomes that need different answers from the
-        person reading it:
+        which, and separates two outcomes needing different answers:
 
           Attempted   winget tried and the install failed. Worth retrying, and
                       often fixable -- a package whose executable is running
                       cannot be replaced until it is closed.
 
-          Skipped     winget listed it and never tried. Usually "a newer package
-                      version is available in a configured source, but it does
-                      not apply to your system or requirements", which is
-                      permanent until the vendor ships something that applies.
-                      Reporting that as a failure every run teaches people to
-                      ignore the ones that are not.
+          Skipped     winget listed it and never tried, usually because a newer
+                      version does not apply to this system. That is permanent
+                      until the vendor ships something that does, and reporting
+                      it as a failure every run teaches people to skim past it.
 
-        Attempted is decided by winget's own "Found <name> [<id>]" line, which it
-        writes when it begins a package. Nothing else in the output is reliable:
-        the rest is localised prose.
+        Attempted is decided by winget's own "Found <name> [<id>]" line. The rest
+        of the output is localised prose.
 
         .PARAMETER Before
         The upgrade table from before the pass.

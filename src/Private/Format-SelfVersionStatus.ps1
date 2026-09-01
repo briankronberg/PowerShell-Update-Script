@@ -4,21 +4,20 @@ function Format-SelfVersionStatus {
         One line saying how the running version compares to the published one.
 
         .DESCRIPTION
-        The version that matters is the one *running*, which is not always the
-        highest installed: a session imported by path, or one that loaded before
-        an update replaced the files on disk, is running something else. So the
-        running version is passed in rather than looked up.
+        The version that matters is the one running, which is not always the
+        highest installed: a session imported by path, or loaded before an update
+        replaced the files, is running something else. So it is passed in rather
+        than looked up.
 
-        Three answers must not be confused with each other, and each has been a
-        wrong message somewhere before:
+        Three answers that must not be confused:
 
           behind          the gallery is ahead, and -UpdateSelf will fetch it
           ahead / equal   nothing to do
           cannot tell     the gallery was not reachable
 
-        A copy PowerShellGet did not install -- one the GitHub installer placed,
-        for instance -- is frequently *ahead* of the gallery rather than behind,
-        so it is named separately and never called out of date.
+        A copy PowerShellGet did not install is frequently ahead of the gallery
+        rather than behind, so it is named separately and never called out of
+        date.
 
         .PARAMETER Running
         The version of the module actually executing.

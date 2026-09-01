@@ -394,16 +394,16 @@ there is one source of truth about whether the code passes.
 
 ### Where the time goes
 
-The full suite takes about 88 seconds, and two costs account for half of it.
+The full suite takes about 90 seconds, and two costs account for half of it.
 Neither is a defect and neither is worth optimising:
 
 | Cost | What it is |
 |---|---|
-| ~17s | The **first** `Invoke-ScriptAnalyzer` call in a process. Loading the rule assemblies is the entire expense: every call after it is milliseconds, and analysing all 57 files takes 0.44s once the first has paid. Batching the calls does not help, because the number of calls is not what costs. |
+| ~19s | The **first** `Invoke-ScriptAnalyzer` call in a process. Loading the rule assemblies is the entire expense: every call after it is milliseconds, and the remaining files together take under a second. Batching the calls does not help, because the number of calls is not what costs. |
 | ~25s | Four `Integration` tests, registering three real scheduled tasks. Registering one costs 3.7s and removing it 2.9s against the real Task Scheduler, and there is nothing between the test and that price. |
 
-The rest of the suite -- 644 tests -- runs in 58 seconds. While iterating, skip
-both:
+The rest of the suite -- 644 of the 720 tests -- runs in 59 seconds. While
+iterating, skip both:
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -ExcludeTag Lint,Integration
