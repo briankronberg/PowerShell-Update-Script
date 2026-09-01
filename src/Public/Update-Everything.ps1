@@ -448,7 +448,19 @@
     #   0x8A150014 (-1978335212) APPINSTALLER_CLI_ERROR_NO_APPLICATIONS_FOUND
     $WingetNothingToDo = @(-1978335189, -1978335212)
 
+    # The version that produced this log. Nothing else in a run said it, so a
+    # transcript could not be read against the code that made it -- a step that
+    # failed two releases ago looked identical to one failing now.
+    #
+    # The running version, from the module executing this, not the highest
+    # installed. A session imported by path, or one that loaded before an update
+    # replaced the files, is running something else.
+    $script:RunningVersion = $MyInvocation.MyCommand.Module.Version
+
     Write-Host "Maintenance run started $(Get-Date)  |  Admin: $isAdmin  |  Main Log: $mainLog" -ForegroundColor Green
+    if ($script:RunningVersion) {
+        Write-Host "UpdateEverything $script:RunningVersion" -ForegroundColor Green
+    }
 
     # ---------------------------------------------------------------------------
     # 1a. What this machine actually has
@@ -479,6 +491,17 @@
             Write-Output ''
             Write-Output "Not installed: $(($absent.Name | Sort-Object) -join ', ')"
             Write-Output 'Their steps report Skipped, which is the expected result rather than a fault.'
+        }
+
+        # The module's own version, compared against the gallery. Here rather than
+        # in the banner because it costs a network call: a scheduled run on a
+        # machine with no network should not pay a timeout before it starts, and
+        # -ExcludeTag Inventory already turns this off for one that does not want
+        # it.
+        if ($script:RunningVersion) {
+            Write-Output ''
+            Write-Output (Format-SelfVersionStatus -Running $script:RunningVersion `
+                -Status (Get-GalleryModuleStatus -Name 'UpdateEverything'))
         }
 
         # More than one executable of a name on PATH means the version above is

@@ -2175,3 +2175,104 @@ Describe 'A step survives a caller who prefers Stop' -Tag 'Unit' {
         $script:Results[0].Status | Should-Be 'Warning'
     }
 }
+
+Describe 'Format-SelfVersionStatus' -Tag 'Unit' {
+
+    # Three answers that must not be confused, because each has been a wrong
+    # message somewhere before: behind, not behind, and could not tell.
+
+    BeforeAll {
+        $script:StatusOf = {
+            param($Installed, $Available, $Updatable = $true)
+            [pscustomobject]@{
+                Name        = 'UpdateEverything'
+                Installed   = if ($Installed) { [version] $Installed } else { $null }
+                Available   = if ($Available) { [version] $Available } else { $null }
+                Updatable   = $Updatable
+                NeedsUpdate = [bool] ($Installed -and $Available -and ([version]$Available -gt [version]$Installed))
+            }
+        }
+    }
+
+    It 'says the running version is current when it matches the gallery' {
+        $line = Format-SelfVersionStatus -Running '1.1.0' -Status (& $script:StatusOf '1.1.0' '1.1.0')
+        $line | Should-MatchString 'newest published'
+    }
+
+    It 'names both versions when the gallery is ahead' {
+        $line = Format-SelfVersionStatus -Running '1.1.0' -Status (& $script:StatusOf '1.1.0' '1.2.0')
+        $line | Should-MatchString '1\.1\.0'
+        $line | Should-MatchString '1\.2\.0'
+    }
+
+    It 'points at -UpdateSelf when the gallery is ahead' {
+        $line = Format-SelfVersionStatus -Running '1.1.0' -Status (& $script:StatusOf '1.1.0' '1.2.0')
+        $line | Should-MatchString '-UpdateSelf'
+    }
+
+    # A copy the GitHub installer placed is frequently ahead of the gallery, and
+    # Update-Module refuses it either way, so -UpdateSelf alone is wrong advice.
+    It 'gives a copy the gallery cannot move the advice that works' {
+        $line = Format-SelfVersionStatus -Running '1.1.0' -Status (& $script:StatusOf '1.1.0' '1.2.0' $false)
+        $line | Should-MatchString 'Install-Module UpdateEverything -Force'
+    }
+
+    # Normal for a clone or a GitHub install, and not a fault.
+    It 'does not call a version ahead of the gallery out of date' {
+        $line = Format-SelfVersionStatus -Running '1.2.0' -Status (& $script:StatusOf '1.2.0' '1.1.0')
+        $line | Should-MatchString 'ahead of the published'
+        $line | Should-NotMatchString 'is published'
+    }
+
+    # An offline run must not report currency it did not establish.
+    It 'says it could not tell when the gallery was unreachable' {
+        $line = Format-SelfVersionStatus -Running '1.1.0' -Status (& $script:StatusOf '1.1.0' $null)
+        $line | Should-MatchString 'could not be asked'
+        $line | Should-NotMatchString 'newest published'
+    }
+
+    It 'says the same when the gallery was never asked at all' {
+        $line = Format-SelfVersionStatus -Running '1.1.0' -Status $null
+        $line | Should-MatchString 'could not be asked'
+    }
+
+    # Running from a clone: a manifest version, nothing installed to compare.
+    It 'reports the running version even with nothing installed' {
+        $line = Format-SelfVersionStatus -Running '1.2.0' -Status (& $script:StatusOf $null '1.1.0' $false)
+        $line | Should-MatchString '1\.2\.0'
+    }
+}
+
+Describe 'A run says which version produced it' -Tag 'Static' {
+
+    BeforeAll {
+        $script:VersionSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    # The running module, not the highest installed. A session imported by path,
+    # or one that loaded before an update replaced the files on disk, is running
+    # something else -- and the log belongs to what ran.
+    It 'takes the version from the module actually executing' {
+        $script:VersionSource | Should-MatchString '\$MyInvocation\.MyCommand\.Module\.Version'
+    }
+
+    It 'prints it at the start, where the log is read from' {
+        $banner = $script:VersionSource.IndexOf('Maintenance run started')
+        $version = $script:VersionSource.IndexOf('Write-Host "UpdateEverything $script:RunningVersion"')
+
+        $version | Should-BeGreaterThan $banner
+        ($version - $banner) | Should-BeLessThan 400
+    }
+
+    # The banner costs nothing and happens always; the comparison costs a network
+    # call, so it lives where -ExcludeTag Inventory already turns it off.
+    It 'keeps the gallery lookup out of the startup path' {
+        $lookup = $script:VersionSource.IndexOf('Format-SelfVersionStatus')
+        $inventory = $script:VersionSource.IndexOf("Invoke-Step -Name 'Inventory'")
+        $selfStep = $script:VersionSource.IndexOf("Invoke-Step -Name 'UpdateEverything (self)'")
+
+        $lookup | Should-BeGreaterThan $inventory
+        $lookup | Should-BeLessThan $selfStep
+    }
+}
