@@ -424,6 +424,35 @@ Self-update runs only for `Standalone` and `Unknown`. Anything it can pin on a
 manager, it skips, naming that manager in the reason. The summary says why
 rather than going quiet.
 
+### Python
+
+Four steps, and they cover different things:
+
+| Step | Updates |
+|---|---|
+| `Python (Install Manager)` | the Python runtimes |
+| `pip` | pip itself, for the interpreter on PATH |
+| `uv` | uv itself, and only when no package manager owns it |
+| `pipx packages` | isolated CLI applications |
+
+**Installed packages are deliberately left alone.** pip has no `upgrade-all`, and
+the usual recipe — list outdated, upgrade each — does not keep the dependency set
+consistent, because upgrading one package can silently downgrade another's
+dependency. That is the problem `pipx` and `uv` exist to solve by isolating, and
+both have their own steps.
+
+**An active virtual environment is never touched.** If `VIRTUAL_ENV` is set the
+step reports skipped and says so: those packages belong to whatever project made
+the environment, not to the machine.
+
+Only the interpreter that resolves on PATH is updated. Others the launcher knows
+about are named in the output and left alone — upgrading pip in every Python on a
+machine is a larger claim than a maintenance run should make on its own.
+
+pip is upgraded through `python -m pip`, never the bare `pip.exe`: on Windows pip
+cannot replace its own running executable, so the direct form fails on a locked
+file.
+
 ## Running without administrator rights
 
 The module checks whether it can elevate before it asks. An account outside the

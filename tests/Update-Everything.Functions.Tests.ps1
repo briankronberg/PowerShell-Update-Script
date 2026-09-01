@@ -2500,3 +2500,82 @@ Describe 'Errors reach the person watching the run' -Tag 'Unit' {
         $script:Results[0].Status | Should-Be 'Warning'
     }
 }
+
+Describe 'The pip step' -Tag 'Static' {
+
+    BeforeAll {
+        $script:PipSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+
+        $script:PipStep = [regex]::Match($script:PipSource,
+            "(?s)Invoke-Step -Name 'pip'.*?\r?\n    \}").Value
+    }
+
+    It 'exists and is tagged Python' {
+        $script:PipStep | Should-NotBeEmptyString
+        $script:PipStep | Should-MatchString "-Tag 'Python'"
+    }
+
+    # An active virtualenv is the easiest interpreter to reach from a step and
+    # the worst one to change: its packages belong to whatever project made it.
+    It 'refuses to touch an active virtual environment' {
+        $script:PipStep | Should-MatchString '\$env:VIRTUAL_ENV'
+        $script:PipStep | Should-MatchString 'Stop-StepAsSkipped'
+    }
+
+    # On Windows pip cannot replace its own running executable, so
+    # "pip install --upgrade pip" fails on a locked file. Through the
+    # interpreter, the exe is not running. Same shape as the winget/uv failure
+    # that prompted this module's leftover reporting.
+    It 'upgrades through the interpreter, not the bare pip executable' {
+        $script:PipStep | Should-MatchString '-m pip install --upgrade pip'
+        $script:PipStep | Should-NotMatchString '(?m)^\s*pip install --upgrade'
+    }
+
+    # pip has no upgrade-all, and list-outdated-then-upgrade-each does not keep
+    # the dependency set consistent. That is the problem pipx and uv solve by
+    # isolating, and both have their own steps.
+    It 'does not try to upgrade installed packages' {
+        $script:PipStep | Should-NotMatchString 'list --outdated'
+        $script:PipStep | Should-NotMatchString 'freeze'
+    }
+
+    It 'names the other interpreters rather than changing them' {
+        $script:PipStep | Should-MatchString 'were not changed'
+    }
+
+    # No -RequiresCommand, because either py or python will do, so the step has
+    # to resolve its own tool and skip explicitly when neither is there.
+    It 'skips itself when no interpreter is present' {
+        $script:PipStep | Should-MatchString 'no Python interpreter is on PATH'
+    }
+
+    It 'skips itself when the interpreter has no pip' {
+        $script:PipStep | Should-MatchString 'pip is not available to'
+    }
+
+    It 'runs before pipx, which depends on a working Python' {
+        $pip  = $script:PipSource.IndexOf("Invoke-Step -Name 'pip'")
+        $pipx = $script:PipSource.IndexOf("Invoke-Step -Name 'pipx packages'")
+
+        $pip | Should-BeGreaterThan -1
+        $pip | Should-BeLessThan $pipx
+    }
+}
+
+Describe 'pip is in the inventory' -Tag 'Unit' {
+
+    It 'is one of the tools reported' {
+        $catalogue = @(Get-UpdateToolInventory -Catalogue @(
+            @{ Name = 'pip'; Command = 'pip'; VersionArgument = '--version' }))
+
+        $catalogue.Name | Should-Be 'pip'
+    }
+
+    It 'is in the real catalogue, so a machine with pip and no pipx says so' {
+        $source = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Get-UpdateToolInventory.ps1') -Raw
+
+        $source | Should-MatchString "Name = 'pip';"
+    }
+}

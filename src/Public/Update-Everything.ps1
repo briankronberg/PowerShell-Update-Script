@@ -1097,6 +1097,62 @@
         }
     }
 
+    Invoke-Step -Name 'pip' -Tag 'Python' -Action {
+        # Never inside an active virtual environment. Its packages belong to
+        # whatever project made it, not to this machine, and it is both the
+        # easiest interpreter to reach from here and the worst one to change.
+        if ($env:VIRTUAL_ENV) {
+            Stop-StepAsSkipped -Reason "a virtual environment is active ($env:VIRTUAL_ENV), and its packages belong to that project rather than to this machine"
+        }
+
+        # Indexed rather than "| Select-Object -First 1": that halts the upstream
+        # pipeline, and inside a step action the transcript records the stop as a
+        # TerminatingError.
+        $found = @('py', 'python' | ForEach-Object {
+            Get-Command $_ -CommandType Application -ErrorAction SilentlyContinue
+        })
+        if (-not $found.Count) {
+            Stop-StepAsSkipped -Reason 'no Python interpreter is on PATH'
+        }
+        $interpreter = $found[0].Source
+
+        $version = (& $interpreter -m pip --version 2>&1 | Out-String).Trim()
+        $global:LASTEXITCODE = 0
+        if (-not $version -or $version -notmatch '^pip\s') {
+            Stop-StepAsSkipped -Reason "pip is not available to $interpreter"
+        }
+        Write-Output $version
+
+        # python -m pip, never the bare pip.exe. On Windows pip cannot replace
+        # its own running executable, so "pip install --upgrade pip" fails on a
+        # locked file; run through the interpreter and the exe is not running.
+        & $interpreter -m pip install --upgrade pip --disable-pip-version-check
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "Could not upgrade pip for $interpreter (exit $LASTEXITCODE). pip's own message is in this step's log."
+            $global:LASTEXITCODE = 0
+        } else {
+            Write-Output ((& $interpreter -m pip --version 2>&1 | Out-String).Trim())
+            $global:LASTEXITCODE = 0
+        }
+
+        # Only this interpreter's pip. The others are named rather than touched:
+        # upgrading pip in every Python on a machine is a larger claim than a
+        # maintenance run should make on its own.
+        $others = @(py --list 2>&1 | Out-String -Stream | Where-Object { $_ -match '^\s*-V:' -and $_ -notmatch '\*' })
+        $global:LASTEXITCODE = 0
+        if ($others.Count) {
+            Write-Output ''
+            Write-Output "$($others.Count) other interpreter(s) are installed and were not changed:"
+            $others | ForEach-Object { Write-Output "  $($_.Trim())" }
+        }
+
+        # Installed packages are deliberately left alone. pip has no upgrade-all,
+        # and list-outdated-then-upgrade-each does not keep the dependency set
+        # consistent -- upgrading one package can silently downgrade another's
+        # dependency. That is the problem pipx and uv exist to avoid, and both
+        # have their own steps.
+    }
+
     Invoke-Step -Name 'pipx packages' -RequiresCommand 'pipx' -Tag 'Python' -Action {
         pipx upgrade-all
     }
