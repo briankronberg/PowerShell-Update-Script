@@ -497,5 +497,8 @@ Afterwards, tag the exact commit that was published, so the permanent version
 has something in the history pointing at it:
 
 ```bash
-git tag -a v1.0.0 -m "1.0.0" && git push origin v1.0.0
+git tag -a v1.1.0 -m "1.1.0" && git push origin v1.1.0
 ```
+
+Then cut a GitHub release at that tag, reusing the manifest's `ReleaseNotes` so
+one text serves the manifest, the gallery page and the release.
