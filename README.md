@@ -451,6 +451,31 @@ The module writes logs to the first writable location among `%USERPROFILE%`,
 Many CLIs write ordinary progress to stderr, so a step earns `Warning` only when
 PowerShell itself raises an error record.
 
+### An error appears twice in the transcript
+
+One error, two identical blocks in `Update-Everything-<timestamp>.log`. **This is
+one error, not two.** The step log holds one copy and the summary counts one, so
+trust those; the count in `COMPLETED WITH ERRORS: <step> (N error record(s))` is
+right.
+
+PowerShell transcribes an error record when it is raised, whatever the pipeline
+then does with it, and transcribes it again when it is displayed. Both are the
+same error arriving by two routes.
+
+It is left alone deliberately. Measured, with a marker in the error text:
+
+| | console | transcript |
+|---|---|---|
+| as it is | **visible** | 2 |
+| error records kept out of the display | **nothing** | 1 |
+
+The raise-time transcript entry comes with no console rendering, so removing the
+duplicate would make every error invisible to whoever is watching the run. Two
+lines in a log is the cheaper problem.
+
+Only the error stream does this. Output, warnings, verbose and native stdout all
+appear once.
+
 ## Installing versus updating
 
 Updating something already installed needs no permission. Installing something
