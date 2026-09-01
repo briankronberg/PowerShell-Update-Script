@@ -667,7 +667,7 @@ Describe 'Every cadence can actually register a task' -Tag 'Integration' {
         Unregister-ScheduledTask -TaskName $script:TestTaskName -Confirm:$false -ErrorAction SilentlyContinue
     }
 
-    It 'registers a <_> task' -ForEach @('Daily', 'Weekly', 'PatchTuesday') -Skip:(-not $script:CanRegister) {
+    It 'registers a <_> task' -ForEach @('Daily', 'Weekly') -Skip:(-not $script:CanRegister) {
         $cadence = $_
 
         # Not wrapped in an assertion about throwing: if it throws, the test
@@ -680,19 +680,37 @@ Describe 'Every cadence can actually register a task' -Tag 'Integration' {
             Should-NotBeNull
     }
 
-    # Week 3, Wednesday, all twelve months. Registering is not enough on its own:
-    # the weekly trigger it starts from would also register cleanly, and would
-    # then run every week instead of every month.
-    It 'gives PatchTuesday a monthly day-of-week trigger, not the weekly one it started as' -Skip:(-not $script:CanRegister) {
-        Register-UpdateEverythingTask -TaskName $script:TestTaskName -Cadence PatchTuesday `
-            -Notify $false -Confirm:$false -ErrorAction Stop 6>$null | Out-Null
+    # PatchTuesday is registered once here and asserted twice, rather than once
+    # per test. Registering costs 3.7s and removing costs 2.9s against the real
+    # Task Scheduler, and the second registration would produce the same task as
+    # the first.
+    #
+    # The parent AfterEach still runs between these two, so the export is taken
+    # in BeforeAll while the task exists.
+    Context 'PatchTuesday' -Skip:(-not $script:CanRegister) {
 
-        $xml = [xml](Export-ScheduledTask -TaskName $script:TestTaskName)
-        $schedule = $xml.Task.Triggers.CalendarTrigger.ScheduleByMonthDayOfWeek
+        BeforeAll {
+            Register-UpdateEverythingTask -TaskName $script:TestTaskName -Cadence PatchTuesday `
+                -Notify $false -Confirm:$false -ErrorAction Stop 6>$null | Out-Null
 
-        $schedule | Should-NotBeNull
-        $schedule.Weeks.Week | Should-Be '3'
-        @($schedule.DaysOfWeek.ChildNodes).Name | Should-Be 'Wednesday'
-        @($schedule.Months.ChildNodes) | Should-BeCollection -Count 12
+            $script:PatchTuesdayXml = [xml](Export-ScheduledTask -TaskName $script:TestTaskName)
+        }
+
+        It 'registers a task' {
+            Get-ScheduledTask -TaskName $script:TestTaskName -ErrorAction SilentlyContinue |
+                Should-NotBeNull
+        }
+
+        # Week 3, Wednesday, all twelve months. Registering is not enough on its
+        # own: the weekly trigger it starts from would also register cleanly, and
+        # would then run every week instead of every month.
+        It 'gives it a monthly day-of-week trigger, not the weekly one it started as' {
+            $schedule = $script:PatchTuesdayXml.Task.Triggers.CalendarTrigger.ScheduleByMonthDayOfWeek
+
+            $schedule | Should-NotBeNull
+            $schedule.Weeks.Week | Should-Be '3'
+            @($schedule.DaysOfWeek.ChildNodes).Name | Should-Be 'Wednesday'
+            @($schedule.Months.ChildNodes) | Should-BeCollection -Count 12
+        }
     }
 }

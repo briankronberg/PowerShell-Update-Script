@@ -82,14 +82,17 @@ Describe 'Read-TimedChoice' -Tag 'Unit','Prompt' {
         $warnings | Should-BeNull -Because "the countdown should draw cleanly: $($warnings -join '; ')"
     }
 
+    # The timeout is short because the assertion is that one is honoured at all,
+    # not that it lasts any particular length. The upper bound stays well clear
+    # of it so a loaded CI agent cannot fail this for being slow.
     It 'gives up and takes the default rather than waiting forever' {
         $elapsed = Measure-Command {
             $script:answer = Read-TimedChoice -Caption 'x' -Choice @('a', 'b') `
-                -TimeoutSeconds 5 -DefaultIndex 1 6>$null
+                -TimeoutSeconds 2 -DefaultIndex 1 6>$null
         }
 
         $script:answer | Should-Be 1
-        $elapsed.TotalSeconds | Should-BeLessThan 15
+        $elapsed.TotalSeconds | Should-BeLessThan 12
     }
 }
 

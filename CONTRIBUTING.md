@@ -370,8 +370,8 @@ Cases that vary only by data use `BeforeDiscovery` with `-ForEach`, so each is
 reported as its own test rather than as one test that loops.
 
 Tag every `Describe`. The suite uses `Static`, `Module`, `Docs`, `Unit`,
-`Consent`, `Prompt`, `Notification` and `Lint`, and they are what make
-`test.ps1 -Tag` and `-ExcludeTag` useful.
+`Consent`, `Prompt`, `Notification`, `Lint` and `Integration`, and they are what
+make `test.ps1 -Tag` and `-ExcludeTag` useful.
 
 One logical assertion per `It`. `Should.ErrorAction` is left at its default of
 `Stop`, so the first failure ends the test — which is what you want, because the
@@ -391,6 +391,29 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File .\test.ps1
 
 Linting is a tagged test inside the suite rather than a separate CI step, so
 there is one source of truth about whether the code passes.
+
+### Where the time goes
+
+The full suite takes about 88 seconds, and two costs account for half of it.
+Neither is a defect and neither is worth optimising:
+
+| Cost | What it is |
+|---|---|
+| ~17s | The **first** `Invoke-ScriptAnalyzer` call in a process. Loading the rule assemblies is the entire expense: every call after it is milliseconds, and analysing all 57 files takes 0.44s once the first has paid. Batching the calls does not help, because the number of calls is not what costs. |
+| ~25s | Four `Integration` tests, registering three real scheduled tasks. Registering one costs 3.7s and removing it 2.9s against the real Task Scheduler, and there is nothing between the test and that price. |
+
+The rest of the suite -- 644 tests -- runs in 58 seconds. While iterating, skip
+both:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\test.ps1 -ExcludeTag Lint,Integration
+```
+
+Run the whole thing before opening a PR. CI runs it either way.
+
+A test that registers a real task should register it once and assert several
+times, in a `Context` with the registration in `BeforeAll`. Two tests that each
+register the same cadence pay the full 6.6s twice for the same task.
 
 ### Ways a test here has passed while the code was broken
 
