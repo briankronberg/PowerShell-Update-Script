@@ -834,6 +834,15 @@ Describe 'Get-ElevationPolicyNote' -Tag 'Unit','Security' {
     # because Test-AdministratorGroupMember already answers $null when a
     # filtered token hides the Administrators SID.
 
+    BeforeEach {
+        # No broker, so these test the registry path alone. Without this the
+        # three "says nothing" tests pass or fail depending on what is running on
+        # the machine -- they were silently host-dependent until a privilege
+        # broker was added to what this function looks at, and then failed on the
+        # first machine that had one.
+        Mock Get-Service { @() }
+    }
+
     It 'says nothing on a machine with no restrictive policy' {
         Mock Get-ItemProperty { [pscustomobject]@{ EnableLUA = 1; ConsentPromptBehaviorAdmin = 2 } }
         Get-ElevationPolicyNote | Should-BeNull
@@ -2605,5 +2614,87 @@ Describe 'pip is in the inventory' -Tag 'Unit' {
             (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Get-UpdateToolInventory.ps1') -Raw
 
         $source | Should-MatchString "Name = 'pip';"
+    }
+}
+
+Describe 'Get-ElevationPolicyNote names a privilege broker' -Tag 'Unit' {
+
+    # A broker can deny an elevation, or allow one application and refuse
+    # another, without leaving anything in the registry. Before this, a refusal
+    # on such a machine produced no note at all -- which reads as "no policy is
+    # interfering" when one just did.
+    #
+    # Recognising vendors by service name would be the wrong trade for a
+    # decision: the next vendor would be missed and a capable machine turned
+    # away. It is the right trade for an explanation, where a missing entry costs
+    # a sentence and decides nothing.
+
+    BeforeEach {
+        # Nothing restrictive in the registry, so only the broker can produce a
+        # note. That is the case this exists for.
+        Mock Get-ItemProperty { [pscustomobject]@{ EnableLUA = 1; ConsentPromptBehaviorAdmin = 2 } }
+    }
+
+    It 'names <_> when its service is running' -ForEach @(
+        'Avecto Defendpoint Service'
+        'BeyondTrust Privilege Management'
+        'CyberArk Endpoint Privilege Manager'
+        'AdminByRequest'
+    ) {
+        $display = $_
+        Mock Get-Service { @([pscustomobject]@{ Name = 'svc'; DisplayName = $display; Status = 'Running' }) }
+
+        Get-ElevationPolicyNote | Should-MatchString ([regex]::Escape($display))
+    }
+
+    It 'says a broker leaves nothing in the registry' {
+        Mock Get-Service { @([pscustomobject]@{ Name = 'defendpoint'; DisplayName = 'Avecto Defendpoint Service'; Status = 'Running' }) }
+
+        Get-ElevationPolicyNote | Should-MatchString 'leave nothing in the registry'
+    }
+
+    It 'ignores a broker service that is not running' {
+        Mock Get-Service { @([pscustomobject]@{ Name = 'defendpoint'; DisplayName = 'Avecto Defendpoint Service'; Status = 'Stopped' }) }
+
+        Get-ElevationPolicyNote | Should-BeNull
+    }
+
+    # "privilege" alone matches unrelated services, and a false positive here
+    # sends somebody to their IT department over nothing.
+    It 'does not match a service that merely contains the word privilege' {
+        Mock Get-Service { @([pscustomobject]@{ Name = 'SeprivilegeHelper'; DisplayName = 'Some Privilege Helper'; Status = 'Running' }) }
+
+        Get-ElevationPolicyNote | Should-BeNull
+    }
+
+    It 'says nothing on a machine with neither policy nor broker' {
+        Mock Get-Service { @([pscustomobject]@{ Name = 'Spooler'; DisplayName = 'Print Spooler'; Status = 'Running' }) }
+
+        Get-ElevationPolicyNote | Should-BeNull
+    }
+
+    It 'still reports a restrictive registry value with no broker present' {
+        Mock Get-ItemProperty { [pscustomobject]@{ ConsentPromptBehaviorUser = 0 } }
+        Mock Get-Service { @() }
+
+        Get-ElevationPolicyNote | Should-MatchString 'ConsentPromptBehaviorUser'
+    }
+
+    It 'reports both when both are present' {
+        Mock Get-ItemProperty { [pscustomobject]@{ ConsentPromptBehaviorUser = 0 } }
+        Mock Get-Service { @([pscustomobject]@{ Name = 'x'; DisplayName = 'Avecto Defendpoint Service'; Status = 'Running' }) }
+
+        $note = Get-ElevationPolicyNote
+        $note | Should-MatchString 'ConsentPromptBehaviorUser'
+        $note | Should-MatchString 'Avecto'
+    }
+
+    # Enumerating services can fail on a locked-down machine, and an explanation
+    # that throws is worse than one that is missing.
+    It 'survives being unable to enumerate services' {
+        Mock Get-Service { throw 'access denied' }
+        Mock Get-ItemProperty { [pscustomobject]@{ ConsentPromptBehaviorUser = 0 } }
+
+        Get-ElevationPolicyNote | Should-MatchString 'ConsentPromptBehaviorUser'
     }
 }
