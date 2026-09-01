@@ -5,28 +5,18 @@
         bar rather than something worth reading.
 
         .DESCRIPTION
-        winget draws progress by writing a bar and repainting it with carriage
-        returns. PowerShell splits captured native output on those carriage
-        returns, so every repaint arrives as its own line and a single download
-        turns into a column of percentages and spinner characters:
-
-            (3/7) Found App Installer [Microsoft.AppInstaller] Version 1.29.290
-            Starting package install...
-              -
-              \
-              |
-              /
-            ################          86%
-            #################         87%
-            ...
+        winget draws progress by repainting a bar with carriage returns.
+        PowerShell splits captured native output on those, so every repaint
+        arrives as its own line and one download becomes a column of spinner
+        characters and percentages.
 
         Nothing suppresses it upstream: --disable-interactivity governs prompts,
-        not rendering, and the bar is not written through the PowerShell
-        progress stream where $ProgressPreference would reach it.
+        not rendering, and the bar does not go through the PowerShell progress
+        stream where $ProgressPreference would reach it.
 
-        The patterns are deliberately narrow -- a bar, a bare percentage, a
-        spinner tick -- because this runs over every line of every step, and
-        dropping real output to tidy a log would be the worse bug.
+        The patterns are narrow -- a bar, a bare percentage, a spinner tick --
+        because this runs over every line of every step, and dropping real
+        output to tidy a log would be the worse bug.
     #>
     [CmdletBinding()]
     [OutputType([bool])]
