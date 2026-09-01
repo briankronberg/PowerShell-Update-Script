@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.2.1'
+    ModuleVersion     = '1.3.0'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -32,7 +32,7 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.2.1
+            ReleaseNotes = '# 1.3.0
 
 One fix, and it matters on managed machines: UpdateEverything refused to elevate
 on any machine using a privilege-management broker.
@@ -45,8 +45,8 @@ privilege-management broker is in use -- BeyondTrust, CyberArk EPM, Admin By
 Request -- because the account is deliberately not in the group and elevates
 anyway, often per application.
 
-On such a machine the module was unusable: it refused before raising a prompt,
-and told the user something untrue about their computer.
+On such a machine 1.2.0 is unusable: it refuses before raising a prompt, and
+tells the user something untrue about their computer.
 
 Group membership is now a caution rather than a refusal, warned about before the
 attempt. The two genuine certainties still refuse, because neither depends on
@@ -55,15 +55,15 @@ beside it.
 
 ## A failed elevation says more
 
-Get-ElevationPolicyNote now names a running privilege broker. Those grant or
-deny elevation per application and leave nothing in the registry, so a refusal
-on such a machine previously produced no explanation at all.
+Get-ElevationPolicyNote names a running privilege broker. Those grant or deny
+elevation per application and leave nothing in the registry, so in 1.2.0 a
+refusal on such a machine came with no explanation at all.
 
 ## Verified
 
-The self-elevation handoff is now tested end to end for the first time, by a new
-harness in tests/Elevation that runs on a real machine with UAC on and asks for
-one click. Development machines and CI runners are already administrators, and
+The self-elevation handoff is tested end to end for the first time, by a harness
+in tests/Elevation that runs on a real machine with UAC on and asks for one
+click. Development machines and CI runners are already administrators, and
 Windows Sandbox ships with UAC off, so nothing before this could reach the code
 that once shipped unable to parse.
 '
