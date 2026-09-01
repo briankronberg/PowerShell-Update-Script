@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.3.1'
+    ModuleVersion     = '1.4.0'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -32,46 +32,46 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.3.1
+            ReleaseNotes = '# 1.4.0
 
-Three fixes to what a run reports, and a documentation pass that held every
-claim against the code. GitHub-only: the gallery carries minor versions, and
-this lands there with 1.4.0.
+One behaviour change to know about before upgrading, eight new update steps,
+and the fixes that shipped on GitHub as 1.3.1.
 
-## The duplicate-copy warning names the right copy
+## -UpdateSelf now updates only this module
 
-When a tool is installed in more than one place, the inventory warns that the
-first is the one that runs. The list behind that warning was alphabetised, not
-PATH-ordered, so the named copy could be the wrong one -- node in C:\tools
-loses alphabetically to C:\Program Files even when PATH runs it first. The
-list now keeps PATH-resolution order.
+The switch is a shortcut for "Install-Module UpdateEverything -Force" (or the
+Main installer with -UpdateSelfSource Main): it updates the module and runs
+nothing else. -Tag and -ExcludeTag are ignored for that run, and no elevation
+is requested, because a CurrentUser install needs none.
 
-## The Python step skips the classic launcher instead of failing
+In 1.3.0 the switch meant "also update the module during a full run". A
+scheduled task passing -UpdateSelf gets only the self-update after this
+upgrade -- give it a second task, or drop the switch, if it should keep doing
+both.
 
-"py install --update" only works on the Python Install Manager''s py alias.
-The classic python.org launcher treats install as a script path and errors,
-which marked the step Failed on every machine that has py but not pymanager.
-The step now tells the two apart and reports the classic launcher as Skipped,
-with the reason.
+## Eight new steps
 
-## A package that appears mid-run is not called permanently blocked
+Deno, Bun and pnpm join npm under the Node tag, each behind the same
+ownership check as uv, so a copy a package manager installed is left to that
+manager. cargo binaries runs "cargo install-update --all" where the
+cargo-update crate is present, and Go binaries runs "gup update" -- both skip
+naming the missing prerequisite rather than installing it. The Azure and
+Google Cloud CLIs arrive under a new Cloud tag, so "-ExcludeTag Cloud" drops
+the pair on a metered or offline machine. conda updates conda itself in the
+base environment; environment packages are left alone for the same reason
+pip''s are.
 
-The winget summary put every package it had not attempted under "Not
-upgradable on this machine, and expected to stay that way" -- including one
-listed for the first time by the closing table, about which nothing is known.
-Those now print under their own line, and the next run picks them up.
+The tag set gains Go and Cloud, and the inventory covers 24 tools.
 
-## Documentation held against the code
+## The 1.3.1 fixes, new to the gallery
 
-A max-effort review compared every rewritten comment, help topic and README
-claim to the code it describes. Among the corrections: the README documented
-a -Cadence value that does not exist (the monthly cadence is PatchTuesday);
-the winget command in the manager table omitted the --accept-* flags that
-accept licence agreements on your behalf; the help promised an exit code the
-module conversion removed; and the verbatim tool messages people grep for --
-winget''s "does not apply to your system or requirements", PowerShellGet''s
-"was not installed by using Install-Module" -- are back in the source,
-findable again.
+When a tool is installed twice, the warning now names the copy PATH actually
+resolves rather than the alphabetically first one. The Python step reports
+the classic py launcher as Skipped instead of Failed on machines without the
+Install Manager. A winget package listed for the first time during a run is
+reported as newly listed, not as permanently blocked. And a documentation
+pass held every README and help claim against the code, restoring the
+verbatim tool messages people grep for.
 '
 
         }
