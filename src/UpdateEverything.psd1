@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.3.0'
+    ModuleVersion     = '1.3.1'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -32,40 +32,46 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.3.0
+            ReleaseNotes = '# 1.3.1
 
-One fix, and it matters on managed machines: UpdateEverything refused to elevate
-on any machine using a privilege-management broker.
+Three fixes to what a run reports, and a documentation pass that held every
+claim against the code. GitHub-only: the gallery carries minor versions, and
+this lands there with 1.4.0.
 
-## Elevation is attempted rather than refused
+## The duplicate-copy warning names the right copy
 
-Test-ElevationCapability treated "not a member of the local Administrators
-group" as proof that Windows would not grant elevation. That is false wherever a
-privilege-management broker is in use -- BeyondTrust, CyberArk EPM, Admin By
-Request -- because the account is deliberately not in the group and elevates
-anyway, often per application.
+When a tool is installed in more than one place, the inventory warns that the
+first is the one that runs. The list behind that warning was alphabetised, not
+PATH-ordered, so the named copy could be the wrong one -- node in C:\tools
+loses alphabetically to C:\Program Files even when PATH runs it first. The
+list now keeps PATH-resolution order.
 
-On such a machine 1.2.0 is unusable: it refuses before raising a prompt, and
-tells the user something untrue about their computer.
+## The Python step skips the classic launcher instead of failing
 
-Group membership is now a caution rather than a refusal, warned about before the
-attempt. The two genuine certainties still refuse, because neither depends on
-who is asking: UAC switched off, and a packaged PowerShell with no MSI build
-beside it.
+"py install --update" only works on the Python Install Manager''s py alias.
+The classic python.org launcher treats install as a script path and errors,
+which marked the step Failed on every machine that has py but not pymanager.
+The step now tells the two apart and reports the classic launcher as Skipped,
+with the reason.
 
-## A failed elevation says more
+## A package that appears mid-run is not called permanently blocked
 
-Get-ElevationPolicyNote names a running privilege broker. Those grant or deny
-elevation per application and leave nothing in the registry, so in 1.2.0 a
-refusal on such a machine came with no explanation at all.
+The winget summary put every package it had not attempted under "Not
+upgradable on this machine, and expected to stay that way" -- including one
+listed for the first time by the closing table, about which nothing is known.
+Those now print under their own line, and the next run picks them up.
 
-## Verified
+## Documentation held against the code
 
-The self-elevation handoff is tested end to end for the first time, by a harness
-in tests/Elevation that runs on a real machine with UAC on and asks for one
-click. Development machines and CI runners are already administrators, and
-Windows Sandbox ships with UAC off, so nothing before this could reach the code
-that once shipped unable to parse.
+A max-effort review compared every rewritten comment, help topic and README
+claim to the code it describes. Among the corrections: the README documented
+a -Cadence value that does not exist (the monthly cadence is PatchTuesday);
+the winget command in the manager table omitted the --accept-* flags that
+accept licence agreements on your behalf; the help promised an exit code the
+module conversion removed; and the verbatim tool messages people grep for --
+winget''s "does not apply to your system or requirements", PowerShellGet''s
+"was not installed by using Install-Module" -- are back in the source,
+findable again.
 '
 
         }
