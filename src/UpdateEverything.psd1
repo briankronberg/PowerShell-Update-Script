@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.2.0'
+    ModuleVersion     = '1.2.1'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -32,58 +32,40 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.2.0
+            ReleaseNotes = '# 1.2.1
 
-A run now says what version produced it, names the packages winget could not
-upgrade, and updates pip. Most of this came from reading two logs off a real
-machine.
+One fix, and it matters on managed machines: UpdateEverything refused to elevate
+on any machine using a privilege-management broker.
 
-## A run says what it is
+## Elevation is attempted rather than refused
 
-The banner names the running version, and the Inventory step compares it against
-the gallery. Nothing in a run said this before, so a transcript could not be read
-against the code that made it -- a step that failed two releases ago looked
-identical to one failing now.
+Test-ElevationCapability treated "not a member of the local Administrators
+group" as proof that Windows would not grant elevation. That is false wherever a
+privilege-management broker is in use -- BeyondTrust, CyberArk EPM, Admin By
+Request -- because the account is deliberately not in the group and elevates
+anyway, often per application.
 
-## winget failures name themselves
+On such a machine the module was unusable: it refused before raising a prompt,
+and told the user something untrue about their computer.
 
-"winget upgrade --all" returns one exit code for the whole pass. The step now
-reports which packages are still out of date and separates two outcomes that
-need different answers:
+Group membership is now a caution rather than a refusal, warned about before the
+attempt. The two genuine certainties still refuse, because neither depends on
+who is asking: UAC switched off, and a packaged PowerShell with no MSI build
+beside it.
 
-  Still out of date after this run:
-    astral-sh.uv 0.11.19 -> 0.12.7  (the install failed; a file was in use,
-                                     so close the program and run again)
+## A failed elevation says more
 
-  Not upgradable on this machine, and expected to stay that way:
-    Cisco.CiscoWebexMeetings 45.6.4 -> 45.6.4.8  (winget listed it and did not
-                                     attempt it)
+Get-ElevationPolicyNote now names a running privilege broker. Those grant or
+deny elevation per application and leave nothing in the registry, so a refusal
+on such a machine previously produced no explanation at all.
 
-The step is marked Warning only for packages winget actually attempted. One it
-declined is not a fault of the run.
+## Verified
 
-## pip
-
-A new step upgrades pip itself, through python -m pip -- on Windows pip cannot
-replace its own running executable, so the direct form fails on a locked file.
-pip is also in the inventory now.
-
-Installed packages are left alone, and an active virtual environment is never
-touched. Those packages belong to whatever project made it.
-
-## Fixed
-
-* The gallery tooling step logged "TerminatingError(Find-PackageProvider)" for a
-  lookup it handled correctly. Start-Transcript records a terminating error
-  whether or not it is caught, so an expected empty answer no longer throws.
-
-## Documented rather than fixed
-
-An error appears twice in a run transcript. It is one error: the step log holds
-one copy and the summary counts one. PowerShell transcribes an error when it is
-raised and again when it is displayed, and removing the second copy would make
-errors invisible on the console. The README explains it and says which record to
-trust.
+The self-elevation handoff is now tested end to end for the first time, by a new
+harness in tests/Elevation that runs on a real machine with UAC on and asks for
+one click. Development machines and CI runners are already administrators, and
+Windows Sandbox ships with UAC off, so nothing before this could reach the code
+that once shipped unable to parse.
 '
 
         }
