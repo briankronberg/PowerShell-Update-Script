@@ -267,7 +267,7 @@ thing that crosses a process boundary.
 more of:
 
 `Windows` `Microsoft` `PowerShell` `PackageManager` `Python` `Node` `DotNet`
-`Rust` `Go` `Git` `Self` `Inventory`
+`Rust` `Go` `Cloud` `Git` `Self` `Inventory`
 
 ```powershell
 Update-Everything -Tag Python
@@ -298,13 +298,13 @@ called out of date.
 quickest way to see why a run skipped what it skipped:
 
 ```
-12 of 21 tools present.
+12 of 24 tools present.
 
   winget           Unknown     v1.29.290
   PowerShell 7     Unknown     PowerShell 7.6.5
   uv               Standalone  uv 0.12.7
 
-Not installed: .NET SDK, Bun, Chocolatey, Deno, gup, pipx, pnpm, rustup, Scoop
+Not installed: .NET SDK, Azure CLI, Bun, Chocolatey, conda, Deno, Google Cloud CLI, gup, pipx, pnpm, rustup, Scoop
 Their steps report Skipped, which is the expected result rather than a fault.
 
 WARNING: PowerShell 7 is installed in 2 places; the first is the one that runs:
@@ -405,12 +405,15 @@ choose the packages; the manager's own inventory does.
 | pip | `py`, else `python` | `<interpreter> -m pip install --upgrade pip --disable-pip-version-check` | pip itself, for the first of those found. Where `py` is present that is the launcher's default interpreter, which is not always the `python` on `PATH`. Installed packages are left alone -- see [Python](#python). |
 | pipx | `pipx` | `pipx upgrade-all` | Every Python application pipx installed. |
 | uv | `uv`, plus an ownership check | `uv self update` | uv itself, and only when nothing else owns it. |
+| conda | `conda` | `conda update --name base conda --yes` | conda itself, in the base environment. Environment packages are left alone for the same reason pip's are -- see [Python](#python). |
 | Python Install Manager | `pymanager`, else a `py` that answers `py help install` | `pymanager install --update`, or `py install --update` through the Install Manager's `py` alias | Installed Python runtimes. The classic `py` launcher cannot update runtimes, so a machine that has only it reports Skipped. |
 | .NET SDK | `dotnet`, plus an SDK version of 6 or higher | `dotnet tool update --all --global`, falling back to updating each tool by name | Global .NET tools. `dotnet` exists for runtime-only installs too, so the step confirms the SDK before using it. |
 | .NET workloads | `dotnet` | `dotnet workload update` | MAUI, Android, iOS and WASM workloads. |
 | rustup | `rustup` | `rustup update` | Every installed Rust toolchain. |
 | cargo binaries | `cargo`, plus the `cargo-update` crate | `cargo install-update --all` | Every binary `cargo install` put on the machine. Skips naming `cargo install cargo-update` when the subcommand is absent. |
 | Go binaries | `go`, plus `gup` | `gup update` | Every binary `go install` put in `GOBIN`. Skips naming `go install github.com/nao1215/gup@latest` when gup is absent. |
+| Azure CLI | `az` | `az upgrade --yes --only-show-errors` | The CLI and its installed extensions. Reruns the MSI, so it needs administrator rights. Tagged `Cloud`: `-ExcludeTag Cloud` drops it on a metered or offline machine. |
+| Google Cloud CLI | `gcloud`, plus an ownership check | `gcloud components update --quiet` | Every installed component of the bundled install. A Chocolatey or Scoop gcloud disables its own component manager and is left to that manager. Tagged `Cloud`. |
 | GitHub CLI | `gh`, plus a non-empty `gh extension list` | `gh extension upgrade --all` | Installed `gh` extensions. That second check matters, because the upgrade command exits non-zero when nothing is installed. |
 
 ### How it decides who owns a tool
@@ -446,8 +449,10 @@ Four steps, and they cover different things:
 | `pip` | pip itself, for the first of `py`, `python` found |
 | `uv` | uv itself, and only when no package manager owns it |
 | `pipx packages` | isolated CLI applications |
+| `conda` | conda itself, in the base environment |
 
-**Installed packages are deliberately left alone.** pip has no `upgrade-all`, and
+**Installed packages are deliberately left alone**, and conda environments with
+them. pip has no `upgrade-all`, and
 the usual recipe — list outdated, upgrade each — does not keep the dependency set
 consistent, because upgrading one package can silently downgrade another's
 dependency. That is the problem `pipx` and `uv` exist to solve by isolating, and
