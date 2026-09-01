@@ -51,6 +51,7 @@ function Get-UpdateToolInventory {
             @{ Name = 'Python launcher'; Command = 'py';      VersionArgument = '--version' }
             @{ Name = 'Python manager';  Command = 'pymanager'; VersionArgument = '--version' }
             @{ Name = 'uv';              Command = 'uv';      VersionArgument = '--version' }
+            @{ Name = 'pip';             Command = 'pip';     VersionArgument = '--version' }
             @{ Name = 'pipx';            Command = 'pipx';    VersionArgument = '--version' }
             @{ Name = '.NET SDK';        Command = 'dotnet';  VersionArgument = '--version' }
             @{ Name = 'rustup';          Command = 'rustup';  VersionArgument = '--version' }
