@@ -1392,9 +1392,12 @@ Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
     # through Install-Module is not something a test should depend on.
     It 'reports Updatable when the receipt covers the newest installed copy' {
         Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { }
         Mock Get-InstalledModule { [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion } }
 
-        (Get-GalleryModuleStatus -Name Pester).Updatable | Should-BeTrue
+        $status = Get-GalleryModuleStatus -Name Pester
+        $status.Updatable | Should-BeTrue
+        $status.Mover     | Should-Be 'Update-Module'
     }
 
     # A receipt can name an older version than the newest copy on disk: a
@@ -1402,6 +1405,7 @@ Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
     # newest copy is then not the one Update-Module moves.
     It 'does not call the newest copy updatable on an older receipt' {
         Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { }
         Mock Get-InstalledModule { [pscustomobject]@{ Name = 'Pester'; Version = [version] '0.0.1' } }
 
         (Get-GalleryModuleStatus -Name Pester).Updatable | Should-BeFalse
@@ -1409,6 +1413,7 @@ Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
 
     It 'reports a copy the host shipped as not updatable' {
         Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { }
         Mock Get-InstalledModule { }
 
         (Get-GalleryModuleStatus -Name Pester).Updatable | Should-BeFalse
@@ -1419,11 +1424,66 @@ Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
     # a shipped PowerShellGet 1.0.0.1 and failed the step.
     It 'still reports NeedsUpdate for a shipped copy the gallery is ahead of' {
         Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { }
         Mock Get-InstalledModule { }
 
         $status = Get-GalleryModuleStatus -Name Pester
         $status.NeedsUpdate | Should-BeTrue
         $status.Updatable   | Should-BeFalse
+    }
+
+    # PSResourceGet ships in the box with PowerShell 7.4 and its receipts are
+    # invisible to Get-InstalledModule -- measured on a real machine, 16
+    # receipts against 2. A copy installed with Install-PSResource counts as a
+    # gallery install, moved by Update-PSResource.
+    It 'reads a PSResourceGet receipt that PowerShellGet cannot see' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion } }
+        Mock Get-InstalledModule { }
+
+        $status = Get-GalleryModuleStatus -Name Pester
+        $status.Receipted | Should-BeTrue
+        $status.Updatable | Should-BeTrue
+        $status.Mover     | Should-Be 'Update-PSResource'
+    }
+
+    # Get-InstalledPSResource lists every installed version. Any of them
+    # covering the newest copy is enough, whatever order they arrive in.
+    It 'accepts any receipted version that covers the newest copy' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource {
+            [pscustomobject]@{ Name = 'Pester'; Version = [version] '0.0.1' }
+            [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion }
+        }
+        Mock Get-InstalledModule { }
+
+        (Get-GalleryModuleStatus -Name Pester).Updatable | Should-BeTrue
+    }
+
+    It 'falls back to the PowerShellGet receipt when only it covers the newest copy' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { [pscustomobject]@{ Name = 'Pester'; Version = [version] '0.0.1' } }
+        Mock Get-InstalledModule { [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion } }
+
+        $status = Get-GalleryModuleStatus -Name Pester
+        $status.Updatable | Should-BeTrue
+        $status.Mover     | Should-Be 'Update-Module'
+    }
+
+    It 'prefers the PSResourceGet client when both receipts cover' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion } }
+        Mock Get-InstalledModule { [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion } }
+
+        (Get-GalleryModuleStatus -Name Pester).Mover | Should-Be 'Update-PSResource'
+    }
+
+    It 'names no mover for a copy nothing receipted' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { }
+        Mock Get-InstalledModule { }
+
+        (Get-GalleryModuleStatus -Name Pester).Mover | Should-BeNull
     }
 
     It 'reports a module that is not installed as not updatable' {
@@ -2008,6 +2068,18 @@ Describe 'Updating the module itself' -Tag 'Static' {
     It 'says an update lands on the next run, on both paths' {
         $onNextRun = [regex]::Matches($script:SelfSource, 'loads on the next run')
         $onNextRun.Count | Should-BeGreaterThanOrEqual 2
+    }
+
+    # A copy installed with Install-PSResource has no PowerShellGet receipt,
+    # and Update-Module refuses it. The status names the client whose receipt
+    # covers the copy, and the step runs that one.
+    It 'runs the client whose receipt covers the copy' {
+        $script:SelfSource | Should-MatchString "if \(\`$status\.Mover -eq 'Update-PSResource'\)"
+        $script:SelfSource | Should-MatchString "Update-PSResource -Name 'UpdateEverything'"
+    }
+
+    It 'names the elevated command for the client that refused' {
+        $script:SelfSource | Should-MatchString ([regex]::Escape('Update-PSResource UpdateEverything -Scope AllUsers'))
     }
 }
 
