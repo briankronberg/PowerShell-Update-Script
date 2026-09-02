@@ -1486,6 +1486,40 @@ Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
         (Get-GalleryModuleStatus -Name Pester).Mover | Should-BeNull
     }
 
+    # Get-InstalledPSResource without -Scope reads only the per-user paths, so
+    # the machine scope is asked separately. Measured on a real machine: an
+    # AllUsers install had a receipt on disk and the bare call returned nothing.
+    It 'sees an AllUsers receipt the bare call misses' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { }
+        Mock Get-InstalledPSResource {
+            [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion; InstalledLocation = 'C:\Program Files\PowerShell\Modules' }
+        } -ParameterFilter { $Scope -eq 'AllUsers' }
+        Mock Get-InstalledModule { }
+
+        $status = Get-GalleryModuleStatus -Name Pester
+        $status.Receipted  | Should-BeTrue
+        $status.Updatable  | Should-BeTrue
+        $status.Mover      | Should-Be 'Update-PSResource'
+        $status.MoverScope | Should-Be 'AllUsers'
+    }
+
+    # A per-user copy shadows the machine one in PSModulePath order, and moving
+    # it needs no elevation -- so when receipts in both scopes cover, per-user
+    # is the scope the update targets.
+    It 'prefers the per-user scope when receipts in both scopes cover' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource {
+            [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion; InstalledLocation = 'C:\Users\someone\Documents\PowerShell\Modules' }
+        }
+        Mock Get-InstalledPSResource {
+            [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion; InstalledLocation = 'C:\Program Files\PowerShell\Modules' }
+        } -ParameterFilter { $Scope -eq 'AllUsers' }
+        Mock Get-InstalledModule { }
+
+        (Get-GalleryModuleStatus -Name Pester).MoverScope | Should-Be 'CurrentUser'
+    }
+
     It 'reports a module that is not installed as not updatable' {
         Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
 
@@ -2075,7 +2109,15 @@ Describe 'Updating the module itself' -Tag 'Static' {
     # covers the copy, and the step runs that one.
     It 'runs the client whose receipt covers the copy' {
         $script:SelfSource | Should-MatchString "if \(\`$status\.Mover -eq 'Update-PSResource'\)"
-        $script:SelfSource | Should-MatchString "Update-PSResource -Name 'UpdateEverything'"
+        $script:SelfSource | Should-MatchString ([regex]::Escape('Update-PSResource @moveArgs'))
+    }
+
+    # Update-PSResource would not refuse an unelevated call against an
+    # all-users copy -- its CurrentUser default would quietly side-install the
+    # new version per-user. The step checks up front instead.
+    It 'refuses to side-install per-user when the all-users copy needs elevation' {
+        $script:SelfSource | Should-MatchString "MoverScope -eq 'AllUsers' -and -not \`$script:isAdmin"
+        $script:SelfSource | Should-MatchString ([regex]::Escape("if (`$status.MoverScope -eq 'AllUsers') { `$moveArgs.Scope = 'AllUsers' }"))
     }
 
     It 'names the elevated command for the client that refused' {
