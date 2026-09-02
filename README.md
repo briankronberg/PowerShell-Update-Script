@@ -114,6 +114,7 @@ other runs. Check with `Get-ExecutionPolicy -List`.
 | `Get-UpdateEverythingTask` | Reports every task that runs this module, or nothing if there are none |
 | `Unregister-UpdateEverythingTask` | Removes the task |
 | `Test-PendingReboot` | Reports whether Windows is waiting on a restart, and why |
+| `Convert-PowerShell7ToMsi` | Launches the shipped Store-to-MSI migration script under Windows PowerShell |
 
 `Update-All` is an alias for `Update-Everything`.
 
@@ -504,11 +505,15 @@ stops existing at the next update, and its execution alias is a zero-byte
 reparse point Task Scheduler cannot launch.
 
 `Convert-PowerShell7ToMsi.ps1` moves a machine to the MSI install in one
-attended run, from Windows PowerShell:
+attended run, from Windows PowerShell. It ships inside the module -- beside
+the manifest, in the versioned module folder -- so an installed module always
+has it on disk, `Convert-PowerShell7ToMsi` launches it from any session, and
+a run that finds the Store package prints the script's full path. On a
+machine without the module, fetch it straight from the repository:
 
 ```powershell
 $mover = Join-Path $env:TEMP 'Convert-PowerShell7ToMsi.ps1'
-Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Convert-PowerShell7ToMsi.ps1 -OutFile $mover -UseBasicParsing
+Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/src/Convert-PowerShell7ToMsi.ps1 -OutFile $mover -UseBasicParsing
 Unblock-File $mover
 powershell -NoProfile -ExecutionPolicy Bypass -File $mover
 ```
@@ -720,10 +725,10 @@ while the machine was off happens shortly after your next logon.
 ```
 src/UpdateEverything.psd1     module manifest
 src/UpdateEverything.psm1     loader, dot-sources Public and Private
-src/Public/                   the five exported functions, one per file
+src/Public/                   the exported functions, one per file
 src/Private/                  internal helpers, one per file
+src/Convert-PowerShell7ToMsi.ps1  the Store-to-MSI mover, shipped with the module
 Install.ps1                   installs the module from a clone
-Convert-PowerShell7ToMsi.ps1  moves a machine from the Store PowerShell 7 to the MSI
 Publish.ps1                   validates and publishes to the PowerShell Gallery
 test.ps1                      test runner, used locally and by CI
 tests/                        Pester 6 suite

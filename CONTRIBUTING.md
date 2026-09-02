@@ -80,11 +80,16 @@ weeks later. `Get-PowerShellHostPath` resolves a stable host instead.
 pre-run prompt is enabled, and says why. A prompt nobody can answer is a
 scheduled task that hangs until its execution time limit kills it.
 
-### Nothing in `src` calls `exit`
+### Nothing the loader dot-sources calls `exit`
 
 The module returns a result object. `exit` would end the session of whoever
-called it. A test walks the AST of every file and fails on any
-`ExitStatementAst`.
+called it. A test walks the AST of every file under `Public` and `Private`
+and fails on any `ExitStatementAst`.
+
+The one file in `src` outside those folders, `Convert-PowerShell7ToMsi.ps1`,
+does call `exit`, on purpose: it is a standalone script the module ships but
+never dot-sources, run only in its own process via `-File`, where an explicit
+exit code is the contract.
 
 Only the scheduled task turns that result into an exit code, because a process
 boundary is the one place where a number is all that can cross.
