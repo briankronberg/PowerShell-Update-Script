@@ -530,15 +530,18 @@ Maintainers only, and not casually: the PowerShell Gallery has no delete, only
 unlist, which hides a version from search while leaving it installable by anyone
 who names it.
 
-### Only x.y.0 reaches the gallery
+### Minor versions reach the gallery; a patch only when it earns it
 
-Minor versions are published. Patch versions are not, and live on `main` for
-whoever wants them:
+Minor versions are published. Patch versions usually are not, and live on
+`main` for whoever wants them. The exception is a patch that changes what an
+installed copy does on its next run -- 1.7.1, whose fix decides where a
+self-update lands, set the precedent:
 
 | Version | Where |
 |---|---|
 | 1.2.0, 1.3.0, 1.4.0 | PowerShell Gallery, and GitHub |
 | 1.2.1, 1.2.2 | GitHub only |
+| 1.7.1 | PowerShell Gallery, and GitHub |
 
 Every gallery version is permanent -- unlist hides it from search and leaves it
 installable -- so each one is a commitment, and fewer of them means fewer to
@@ -589,7 +592,7 @@ Afterwards, tag the exact commit that was published, so the permanent version
 has something in the history pointing at it:
 
 ```bash
-git tag -a v1.7.0 -m "1.7.0" && git push origin v1.7.0
+git tag -a v1.7.1 -m "1.7.1" && git push origin v1.7.1
 ```
 
 Then cut a GitHub release at that tag, reusing the manifest's `ReleaseNotes` so

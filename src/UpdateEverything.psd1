@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.7.0'
+    ModuleVersion     = '1.7.1'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -33,36 +33,27 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.7.0
+            ReleaseNotes = '# 1.7.1
 
-The Store-to-MSI migration ships in the box.
+One fix, for machines that install the module for all users.
 
-## Convert-PowerShell7ToMsi
+## The self-update sees the machine-wide receipt
 
-The Store (MSIX) PowerShell 7 cannot run elevated, its versioned install
-path breaks anything that recorded it whenever it updates, and winget has
-installed it by default since 7.6 -- so machines arrive in that state
-without anyone choosing it.
+Get-InstalledPSResource without -Scope reads only the per-user paths, so a
+copy installed with Install-PSResource -Scope AllUsers -- receipt on disk,
+returned by the AllUsers query -- reported no gallery lineage at all. Once
+the gallery moved ahead, the self step would have called it a copy the
+gallery did not install.
 
-The module now ships Convert-PowerShell7ToMsi.ps1 beside its manifest: a
-standalone script, run under Windows PowerShell 5.1 with one command,
-because a packaged pwsh can neither elevate nor remove the package hosting
-it. It installs the current MSI release straight from the PowerShell
-project -- not through winget, which would hand back the package being
-removed -- verifies the installed pwsh answers, and only then removes the
-Store package and its provisioning. Windows Terminal is pointed at the MSI
-profile when its old default would disappear with the package. Profiles,
-per-user modules and command history already live in paths both installs
-share, and the report says so instead of moving anything.
+The status now asks PSResourceGet both ways and carries the scope of the
+covering receipt. The self step targets that scope: elevated,
+Update-PSResource runs with -Scope AllUsers; unelevated, the step reports
+the elevation need up front instead of calling at all, because
+Update-PSResource would not refuse -- its CurrentUser default would quietly
+install the new version per-user beside the all-users copy.
 
-The exported Convert-PowerShell7ToMsi command launches the script from any
-session, with -ReportOnly to see the plan and change nothing. A maintenance
-run that finds the Store package on the machine now ends by recommending
-the migration, with the full path to the shipped script.
-
-Both self-elevation handoffs -- Windows PowerShell to an elevated 5.1, and
-pwsh to an elevated MSI pwsh -- were verified attended on a real machine
-with UAC on before this version shipped.
+A per-user receipt wins when both scopes cover: that copy shadows the
+machine one in PSModulePath order, and moving it needs no elevation.
 '
 
         }
