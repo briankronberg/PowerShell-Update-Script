@@ -381,6 +381,15 @@ Describe 'Test-PendingReboot' -Tag 'Unit' {
         (Test-PendingReboot).IsPending | Should-BeFalse
     }
 
+    # Reading the rename keys can be denied. That is not a pending rename, and
+    # it must not fail the probe.
+    It 'treats unreadable rename keys as no rename, not a fault' {
+        Mock Get-ItemProperty { throw 'Requested registry access is not allowed.' } `
+            -ParameterFilter { $LiteralPath -like '*ComputerName*' }
+
+        (Test-PendingReboot).IsPending | Should-BeFalse
+    }
+
     It 'collects every reason when several are pending' {
         Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*Component Based Servicing\RebootPending' }
         Mock Test-Path { $true } -ParameterFilter { $LiteralPath -like '*WindowsUpdate\Auto Update\RebootRequired' }
@@ -2277,6 +2286,209 @@ Describe 'The setup menu loop' -Tag 'Unit' {
         Initialize-UpdateEverything
 
         Should-Invoke Invoke-SetupChoice -ParameterFilter { $Key -eq 'ScheduledTask' }
+    }
+}
+
+Describe 'Invoke-SetupChoice' -Tag 'Unit' {
+
+    BeforeEach {
+        Mock Write-Host { }
+    }
+
+    # The menu is the confirmation for reaching an option, not for installing
+    # anything: no option hands the run an -AllowInstall.
+    It 'runs the prerequisite steps under their tags, with installs still gated' {
+        Mock Update-Everything { }
+
+        Invoke-SetupChoice -Key Prerequisites
+
+        Should-Invoke Update-Everything -Times 1 -Exactly -ParameterFilter {
+            $Tag -contains 'PowerShell' -and $Tag -contains 'PackageManager' -and
+            $Notify -and $IncludePowerShellModules -eq $false -and -not $AllowInstall
+        }
+    }
+
+    It 'hands the scheduled-task option to the submenu' {
+        Mock Invoke-TaskSetup { }
+
+        Invoke-SetupChoice -Key ScheduledTask
+
+        Should-Invoke Invoke-TaskSetup -Times 1 -Exactly
+    }
+
+    It 'runs the ordinary run for the first-run option' {
+        Mock Update-Everything { }
+
+        Invoke-SetupChoice -Key FirstRun
+
+        Should-Invoke Update-Everything -Times 1 -Exactly -ParameterFilter {
+            -not $Tag -and -not $AllowInstall
+        }
+    }
+
+    Context 'The developer-tools menu' {
+
+        BeforeEach {
+            Mock Get-DeveloperToolCatalogue {
+                [pscustomobject]@{ Name = 'Git';    Id = 'Git.Git'; Present = $true;  Description = 'version control' }
+                [pscustomobject]@{ Name = 'Node';   Id = 'N.N';     Present = $false; Description = 'a runtime' }
+                [pscustomobject]@{ Name = 'VSCode'; Id = 'M.V';     Present = $false; Description = 'an editor' }
+            }
+            Mock Install-DeveloperTool {
+                [pscustomobject]@{ Installed = 1; Skipped = 0; Failed = 0 }
+            }
+        }
+
+        It 'installs nothing on a blank answer' {
+            Mock Read-Host { '' }
+
+            Invoke-SetupChoice -Key DeveloperTools
+
+            Should-NotInvoke Install-DeveloperTool
+        }
+
+        It 'turns picked numbers into catalogue names' {
+            Mock Read-Host { '1, 3' }
+
+            Invoke-SetupChoice -Key DeveloperTools
+
+            Should-Invoke Install-DeveloperTool -Times 1 -Exactly -ParameterFilter {
+                $Name -contains 'Git' -and $Name -contains 'VSCode' -and @($Name).Count -eq 2
+            }
+        }
+
+        It 'refuses a number that is not on the menu' {
+            Mock Read-Host { '99' }
+
+            $null = Invoke-SetupChoice -Key DeveloperTools 3>$null
+
+            Should-NotInvoke Install-DeveloperTool
+        }
+
+        It 'keeps the valid picks when one is a typo' {
+            Mock Read-Host { '2, x' }
+
+            $null = Invoke-SetupChoice -Key DeveloperTools 3>$null
+
+            Should-Invoke Install-DeveloperTool -Times 1 -Exactly -ParameterFilter {
+                @($Name).Count -eq 1 -and $Name -contains 'Node'
+            }
+        }
+    }
+}
+
+Describe 'Invoke-TaskSetup' -Tag 'Unit' {
+
+    BeforeEach {
+        Mock Write-Host { }
+        Mock New-TaskFromPrompt { }
+        Mock Register-UpdateEverythingTask { }
+        Mock Unregister-UpdateEverythingTask { }
+    }
+
+    Context 'No task registered yet' {
+
+        BeforeEach { Mock Get-UpdateEverythingTask { @() } }
+
+        It 'registers the weekly default' {
+            Invoke-TaskSetup
+
+            Should-Invoke Register-UpdateEverythingTask -Times 1 -Exactly -ParameterFilter {
+                $Cadence -eq 'Weekly' -and $Notify
+            }
+        }
+
+        It 'turns a refused registration into a warning, not a stack trace' {
+            Mock Register-UpdateEverythingTask { throw 'requires an elevated session' }
+
+            $warnings = @(Invoke-TaskSetup 3>&1)
+
+            "$($warnings -join ' ')" | Should-MatchString 'Could not register the task'
+        }
+    }
+
+    Context 'Tasks already registered' {
+
+        BeforeEach {
+            $script:TwoTasks = @(
+                [pscustomobject]@{ TaskName = 'Update-Everything';        TaskPath = '\'; State = 'Ready'; NextRun = $null }
+                [pscustomobject]@{ TaskName = 'Update-Everything-Python'; TaskPath = '\'; State = 'Ready'; NextRun = $null }
+            )
+            Mock Get-UpdateEverythingTask { $script:TwoTasks }
+        }
+
+        It 'adds another task through the wizard' {
+            Mock Read-Host { '1' }
+
+            Invoke-TaskSetup
+
+            Should-Invoke New-TaskFromPrompt -Times 1 -Exactly
+        }
+
+        It 'replaces the chosen task, keeping its name' {
+            Mock Read-Host { '2' }
+            Mock Select-TaskFromList { $script:TwoTasks[1] }
+
+            Invoke-TaskSetup
+
+            Should-Invoke New-TaskFromPrompt -Times 1 -Exactly -ParameterFilter {
+                $DefaultName -eq 'Update-Everything-Python' -and $Replace
+            }
+        }
+
+        It 'does nothing when the replace pick is abandoned' {
+            Mock Read-Host { '2' }
+            Mock Select-TaskFromList { }
+
+            Invoke-TaskSetup
+
+            Should-NotInvoke New-TaskFromPrompt
+        }
+
+        It 'removes only after a spelled-out yes' {
+            $script:answers = @('3', 'y')
+            $script:next = 0
+            Mock Read-Host { $script:answers[$script:next++] }
+            Mock Select-TaskFromList { $script:TwoTasks[0] }
+
+            Invoke-TaskSetup
+
+            Should-Invoke Unregister-UpdateEverythingTask -Times 1 -Exactly -ParameterFilter {
+                $TaskName -eq 'Update-Everything'
+            }
+        }
+
+        It 'leaves the task alone when the answer is not yes' {
+            $script:answers = @('3', '')
+            $script:next = 0
+            Mock Read-Host { $script:answers[$script:next++] }
+            Mock Select-TaskFromList { $script:TwoTasks[0] }
+
+            Invoke-TaskSetup
+
+            Should-NotInvoke Unregister-UpdateEverythingTask
+        }
+
+        It 'turns a failed removal into a warning' {
+            $script:answers = @('3', 'yes')
+            $script:next = 0
+            Mock Read-Host { $script:answers[$script:next++] }
+            Mock Select-TaskFromList { $script:TwoTasks[0] }
+            Mock Unregister-UpdateEverythingTask { throw 'access denied' }
+
+            $warnings = @(Invoke-TaskSetup 3>&1)
+
+            "$($warnings -join ' ')" | Should-MatchString 'Could not remove the task'
+        }
+
+        It 'goes back without touching anything' {
+            Mock Read-Host { '4' }
+
+            Invoke-TaskSetup
+
+            Should-NotInvoke New-TaskFromPrompt
+            Should-NotInvoke Unregister-UpdateEverythingTask
+        }
     }
 }
 
