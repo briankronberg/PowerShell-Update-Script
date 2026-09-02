@@ -1790,6 +1790,20 @@ Describe 'Get-UpdateToolInventory' -Tag 'Unit' {
         $null = Get-UpdateToolInventory -Catalogue @($bad)
         $LASTEXITCODE | Should-Be 0
     }
+
+    # A command can resolve and still not start: a stale shim, a stub whose
+    # target was uninstalled. The record stays Present with no version, no
+    # throw and no leftover exit code.
+    It 'reports a tool whose version command cannot start as present, without a version' {
+        Mock Get-Command { [pscustomobject]@{ Source = 'C:\shims\ue-broken-shim.exe' } }
+
+        $r = Get-UpdateToolInventory -Catalogue @(
+            @{ Name = 'Broken'; Command = 'ue-broken-shim-2b9d'; VersionArgument = '--version' })
+
+        $r.Present | Should-BeTrue
+        $r.Version | Should-BeNull
+        $LASTEXITCODE | Should-Be 0
+    }
 }
 
 Describe 'Step order' -Tag 'Static' {
@@ -2061,6 +2075,95 @@ Describe 'Install-DeveloperTool' -Tag 'Unit' {
         $result = Install-DeveloperTool -Name 'PowerShell 7' -WarningAction SilentlyContinue 6>$null
         $result.Installed | Should-Be 0
         $result.Skipped   | Should-Be 1
+    }
+
+    It 'says when winget itself is missing' {
+        Mock Get-Command { }
+
+        $warnings = @(Install-DeveloperTool -Name 'Git' 3>&1)
+
+        "$($warnings -join ' ')" | Should-MatchString 'winget is not available'
+    }
+
+    Context 'An approved install' {
+
+        BeforeEach {
+            Mock Write-Host { }
+            Mock Get-Command { [pscustomobject]@{ Name = 'winget' } }
+            Mock Approve-Install { $true }
+            Mock Get-DeveloperToolCatalogue {
+                [pscustomobject]@{
+                    Name          = 'FakeTool'
+                    Id            = 'Fake.Tool'
+                    Present       = $false
+                    Description   = 'A catalogue entry for this test'
+                    InstallerType = $null
+                }
+            }
+        }
+
+        # winget is a native executable, so Mock cannot intercept it; a function
+        # of the same name in this scope can, because command resolution finds
+        # it before the application.
+        It 'runs winget against the exact id and counts the success' {
+            function winget { $script:WingetArgs = $args; $global:LASTEXITCODE = 0 }
+
+            $result = Install-DeveloperTool -Name 'FakeTool'
+
+            $result.Installed | Should-Be 1
+            $result.Failed    | Should-Be 0
+            "$script:WingetArgs" | Should-MatchString ([regex]::Escape('install --id Fake.Tool --exact'))
+        }
+
+        It 'declines interactivity and accepts agreements, so a menu install cannot hang' {
+            function winget { $script:WingetArgs = $args; $global:LASTEXITCODE = 0 }
+
+            $null = Install-DeveloperTool -Name 'FakeTool'
+
+            "$script:WingetArgs" | Should-MatchString '--disable-interactivity'
+            "$script:WingetArgs" | Should-MatchString '--accept-package-agreements'
+        }
+
+        It 'passes a pinned installer type through' {
+            Mock Get-DeveloperToolCatalogue {
+                [pscustomobject]@{
+                    Name          = 'FakeTool'
+                    Id            = 'Fake.Tool'
+                    Present       = $false
+                    Description   = 'A catalogue entry for this test'
+                    InstallerType = 'msi'
+                }
+            }
+            function winget { $script:WingetArgs = $args; $global:LASTEXITCODE = 0 }
+
+            $null = Install-DeveloperTool -Name 'FakeTool'
+
+            "$script:WingetArgs" | Should-MatchString '--installer-type msi'
+        }
+
+        It 'counts a failed installer as failed and leaves no exit code behind' {
+            function winget { $global:LASTEXITCODE = 5 }
+
+            $result = Install-DeveloperTool -Name 'FakeTool' -WarningAction SilentlyContinue
+
+            $result.Failed    | Should-Be 1
+            $result.Installed | Should-Be 0
+            $LASTEXITCODE     | Should-Be 0
+        }
+
+        # The gate this module lives by: declined means skipped, and winget is
+        # never reached.
+        It 'installs nothing when consent is declined' {
+            Mock Approve-Install { $false }
+            function winget { $script:WingetRan = $true }
+
+            $script:WingetRan = $false
+            $result = Install-DeveloperTool -Name 'FakeTool'
+
+            $result.Skipped   | Should-Be 1
+            $result.Installed | Should-Be 0
+            $script:WingetRan | Should-BeFalse
+        }
     }
 }
 
@@ -2343,6 +2446,62 @@ Describe 'Format-SelfVersionStatus' -Tag 'Unit' {
         $line = Format-SelfVersionStatus -Running '1.2.0' -Status (& $script:StatusOf $null '1.1.0' $false)
         $line | Should-MatchString '1\.2\.0'
     }
+
+    # Behind the gallery with no installed copy anywhere: imported by path from
+    # a clone of an old tag. Update-Module has no receipt to move there, so the
+    # advice is the install command, not -UpdateSelf.
+    It 'sends a behind copy that is installed nowhere to Install-Module' {
+        $line = Format-SelfVersionStatus -Running '1.0.0' -Status (& $script:StatusOf $null '1.2.0' $false)
+        $line | Should-MatchString 'outside a module path'
+        $line | Should-MatchString ([regex]::Escape('Install-Module UpdateEverything -Force'))
+    }
+}
+
+Describe 'New-UpdateEverythingResult' -Tag 'Unit' {
+
+    # The counts exist so a scheduled task can end with "exit FailedCount".
+    # They are derived from the step records rather than passed in, so they
+    # cannot disagree with the steps they describe.
+
+    BeforeAll {
+        $script:FiveSteps = @(
+            [pscustomobject]@{ Step = 'a'; Status = 'OK' }
+            [pscustomobject]@{ Step = 'b'; Status = 'OK' }
+            [pscustomobject]@{ Step = 'c'; Status = 'Warning' }
+            [pscustomobject]@{ Step = 'd'; Status = 'Skipped' }
+            [pscustomobject]@{ Step = 'e'; Status = 'Failed' }
+        )
+    }
+
+    It 'derives every count from the step records' {
+        $r = New-UpdateEverythingResult -Ran $true -Steps $script:FiveSteps
+        $r.OkCount      | Should-Be 2
+        $r.WarningCount | Should-Be 1
+        $r.SkippedCount | Should-Be 1
+        $r.FailedCount  | Should-Be 1
+    }
+
+    It 'counts nothing as failed when nothing ran' {
+        $r = New-UpdateEverythingResult -Ran $false -Reason 'declined at the prompt'
+        $r.FailedCount | Should-Be 0
+        $r.Reason      | Should-Be 'declined at the prompt'
+    }
+
+    # A parent that handed the work to an elevated child has no step records of
+    # its own, only the child's exit code. That number must win.
+    It 'lets a handed-in failure count stand in for missing step records' {
+        (New-UpdateEverythingResult -Ran $true -FailedCount 3).FailedCount | Should-Be 3
+    }
+
+    It 'treats a handed-in zero as an answer, not an absence' {
+        (New-UpdateEverythingResult -Ran $true -Steps $script:FiveSteps -FailedCount 0).FailedCount |
+            Should-Be 0
+    }
+
+    It 'types the result so callers can recognise it' {
+        (New-UpdateEverythingResult -Ran $true).PSTypeNames -contains 'UpdateEverything.Result' |
+            Should-BeTrue
+    }
 }
 
 Describe 'A run says which version produced it' -Tag 'Static' {
@@ -2560,6 +2719,15 @@ remove: Access is denied.: "C:\...\WinGet\Packages\astral-sh.uv_...\uv.exe"
 
         @($rows | Where-Object { $_.Id -eq 'New.New' }).Listed | Should-BeFalse
         @($rows | Where-Object { $_.Id -eq 'Cisco.CiscoWebexMeetings' }).Listed | Should-BeTrue
+    }
+
+    # An attempted install can fail without the file-in-use signature. A reason
+    # is still owed, and it stays generic rather than guessing at a diagnosis.
+    It 'still gives an undiagnosed failure a reason' {
+        $output = $script:Output -replace 'Access is denied', 'error 0x80070001'
+        $uv = @(Get-WingetLeftover -Before $script:Before -After $script:Before -Output $output) |
+            Where-Object { $_.Id -eq 'astral-sh.uv' }
+        $uv.Reason | Should-Be 'the install failed'
     }
 }
 
