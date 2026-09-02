@@ -1629,6 +1629,19 @@
         Write-Host "`n[OK] No pending reboots detected." -ForegroundColor Green
     }
 
+    # The Store package cannot run elevated, and anything that recorded its
+    # versioned path breaks when it updates. Moving off it is a one-time,
+    # attended migration, so the run recommends the shipped script rather than
+    # performing it. The package family alias directory is the cheap test: it
+    # exists per user exactly when the Store package is installed.
+    $storeAlias = Join-Path $env:LOCALAPPDATA 'Microsoft\WindowsApps\Microsoft.PowerShell_8wekyb3d8bbwe\pwsh.exe'
+    $mover = Join-Path $script:ModuleRoot 'Convert-PowerShell7ToMsi.ps1'
+    if ((Test-Path -LiteralPath $storeAlias) -and (Test-Path -LiteralPath $mover)) {
+        Write-Host "`n[!] PowerShell 7 here includes the Store package, which cannot run elevated and" -ForegroundColor Yellow
+        Write-Host '    breaks scheduled tasks when it updates. Move it to the MSI install with:' -ForegroundColor Yellow
+        Write-Host "      powershell -NoProfile -ExecutionPolicy Bypass -File `"$mover`"" -ForegroundColor Yellow
+    }
+
     if ($Notify) {
         $okCount      = @($Results | Where-Object { $_.Status -eq 'OK' }).Count
         $skippedCount = @($Results | Where-Object { $_.Status -eq 'Skipped' }).Count

@@ -54,6 +54,7 @@ BeforeDiscovery {
         'Unregister-UpdateEverythingTask'
         'Get-UpdateEverythingTask'
         'Test-PendingReboot'
+        'Convert-PowerShell7ToMsi'
     )
 
     $HasAnalyzer = [bool] (Get-Module PSScriptAnalyzer -ListAvailable)
@@ -63,7 +64,7 @@ BeforeDiscovery {
     $LintTargets += (Join-Path $ModuleRoot 'UpdateEverything.psm1')
     $LintTargets += (Join-Path $RepoRoot 'test.ps1')
     $LintTargets += (Join-Path $RepoRoot 'Install.ps1')
-    $LintTargets += (Join-Path $RepoRoot 'Convert-PowerShell7ToMsi.ps1')
+    $LintTargets += (Join-Path $ModuleRoot 'Convert-PowerShell7ToMsi.ps1')
 
     # Everything under tests\: the test files, and the fresh-machine and
     # elevation harnesses. Pester runs *.Tests.ps1 and nothing runs the
@@ -819,7 +820,7 @@ Describe 'The Store-to-MSI mover' -Tag 'Static' {
 
     BeforeAll {
         $script:MoverSource = Get-Content `
-            (Join-Path (Split-Path $PSScriptRoot -Parent) 'Convert-PowerShell7ToMsi.ps1') -Raw
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Convert-PowerShell7ToMsi.ps1') -Raw
     }
 
     # The Store package cannot remove the process it is hosting, and a packaged
@@ -865,6 +866,27 @@ Describe 'The Store-to-MSI mover' -Tag 'Static' {
 
     It 'is documented in the README' {
         $script:Readme | Should-MatchString 'Convert-PowerShell7ToMsi'
+    }
+
+    # The script ships inside the module folder, so every install has it at a
+    # knowable path, and the run points at that path when the Store package is
+    # on the machine.
+    It 'is recommended by the run, with the full path, when the Store package is present' {
+        $main = Get-Content $script:MainPath -Raw
+
+        $main | Should-MatchString 'Microsoft\.PowerShell_8wekyb3d8bbwe'
+        $main | Should-MatchString ([regex]::Escape("Join-Path `$script:ModuleRoot 'Convert-PowerShell7ToMsi.ps1'"))
+        $main | Should-MatchString ([regex]::Escape('-File `"$mover`"'))
+    }
+
+    # The rule that nothing in the function folders calls exit stands; the
+    # script is not a function, is never dot-sourced by the loader, and runs
+    # only in its own process via -File, where the exit code is the contract.
+    It 'stays out of the folders the loader dot-sources' {
+        Test-Path (Join-Path $script:ModuleRoot 'Public\Convert-PowerShell7ToMsi.ps1') | Should-BeTrue
+        Test-Path (Join-Path $script:ModuleRoot 'Convert-PowerShell7ToMsi.ps1') | Should-BeTrue
+        $wrapper = Get-Content (Join-Path $script:ModuleRoot 'Public\Convert-PowerShell7ToMsi.ps1') -Raw
+        $wrapper | Should-NotMatchString 'Remove-AppxPackage'
     }
 }
 

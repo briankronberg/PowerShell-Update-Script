@@ -74,7 +74,7 @@ try {
 
     $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction SilentlyContinue
     Add-Check 'the manifest validates' ($null -ne $manifest) "version $($manifest.Version)"
-    Add-Check 'the manifest carries the six exports' ($manifest.ExportedFunctions.Count -eq 6) `
+    Add-Check 'the manifest carries the seven exports' ($manifest.ExportedFunctions.Count -eq 7) `
         "$($manifest.ExportedFunctions.Count) exported"
 
     Get-Module -Name UpdateEverything | Remove-Module -Force -ErrorAction SilentlyContinue

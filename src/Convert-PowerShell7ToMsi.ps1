@@ -66,6 +66,9 @@
     Progress and a report. Exits 1 when a step it committed to fails.
 #>
 
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidUsingWriteHost', '', Justification = 'Write-Host is the user interface of an attended console migration. Its output is a plan and a report a person reads and answers, not data a caller consumes.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions', '', Justification = 'The script prints its plan and asks once before changing anything; -ReportOnly is the dry run, and the internal functions run only after that gate.')]
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSReviewUnusedParameter', '', Justification = 'False positive on the [MatchEvaluator] { param($m) ... } delegate, whose signature requires the parameter whether or not it is read.')]
 [CmdletBinding()]
 param(
     [switch] $ReportOnly,

@@ -2083,6 +2083,39 @@ Describe 'Updating the module itself' -Tag 'Static' {
     }
 }
 
+Describe 'Convert-PowerShell7ToMsi (the launcher)' -Tag 'Unit' {
+
+    # The work lives in the shipped script, which must run under Windows
+    # PowerShell; the exported function only launches it. powershell.exe is a
+    # native executable, so a function of the same name intercepts the call.
+
+    It 'launches the shipped script under Windows PowerShell, switches forwarded' {
+        function powershell.exe { $script:MoverArgs = $args; $global:LASTEXITCODE = 0 }
+
+        Convert-PowerShell7ToMsi -ReportOnly -SkipTerminalDefault
+
+        "$script:MoverArgs" | Should-MatchString 'Convert-PowerShell7ToMsi\.ps1'
+        "$script:MoverArgs" | Should-MatchString '-ReportOnly'
+        "$script:MoverArgs" | Should-MatchString '-SkipTerminalDefault'
+        "$script:MoverArgs" | Should-NotMatchString '-Force'
+    }
+
+    It 'reports a nonzero exit as an error naming the code' {
+        function powershell.exe { $global:LASTEXITCODE = 7 }
+
+        $failures = @()
+        Convert-PowerShell7ToMsi -ReportOnly -ErrorAction SilentlyContinue -ErrorVariable failures
+
+        "$($failures -join ' ')" | Should-MatchString 'exited with code 7'
+    }
+
+    It 'throws when the shipped script is missing, naming the expected path' {
+        Mock Test-Path { $false }
+
+        { Convert-PowerShell7ToMsi } | Should-Throw -ExceptionMessage '*migration script is not at*'
+    }
+}
+
 Describe 'The MiKTeX step' -Tag 'Static' {
 
     BeforeAll {
