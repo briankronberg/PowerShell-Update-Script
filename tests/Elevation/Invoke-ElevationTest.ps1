@@ -38,6 +38,14 @@ param(
     [ValidateRange(1, 60)]
     [int] $TimeoutMinutes = 10,
 
+    # Which PowerShell hosts the unelevated payload. Invoke-SelfElevation
+    # prefers the same host when it relaunches elevated, so this chooses which
+    # edition's handoff the click exercises. powershell.exe is the default
+    # because it is always present; pwsh.exe covers the Windows Terminal case
+    # on a machine whose PowerShell 7 is the MSI install.
+    [ValidateSet('powershell.exe', 'pwsh.exe')]
+    [string] $HostExecutable = 'powershell.exe',
+
     [switch] $KeepOutput
 )
 
@@ -118,7 +126,7 @@ try {
         $usedTask = $true
         Write-Host '  this session is elevated, so dropping privileges through a scheduled task...' -ForegroundColor DarkGray
 
-        $action = New-ScheduledTaskAction -Execute 'powershell.exe' `
+        $action = New-ScheduledTaskAction -Execute $HostExecutable `
             -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$payload`" -ResultPath `"$resultFile`""
         $principal = New-ScheduledTaskPrincipal `
             -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) `
@@ -129,7 +137,7 @@ try {
         Start-ScheduledTask -TaskName $taskName
     } else {
         Write-Host '  this session is not elevated, so running here directly...' -ForegroundColor DarkGray
-        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $payload -ResultPath $resultFile
+        & $HostExecutable -NoProfile -ExecutionPolicy Bypass -File $payload -ResultPath $resultFile
     }
 
     $deadline = (Get-Date).AddMinutes($TimeoutMinutes)
