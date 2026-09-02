@@ -385,7 +385,10 @@ Tests reach private functions by dot-sourcing `src/Private/*.ps1` and
 `src/Public/*.ps1` individually rather than importing the module. File work goes
 to `TestDrive`. Anything that reads the keyboard or waits on a clock is mocked —
 `Read-TimedChoice` above all, because a test that waits on a countdown is a test
-that hangs.
+that hangs. The two exceptions are deliberate and bounded: the tests whose
+subject is the countdown itself run the real one, with two- and three-second
+timeouts, because a mocked clock would prove nothing about the redraw and the
+timeout they exist to pin.
 
 Run the suite the way CI does, so green locally means green in the pipeline:
 
