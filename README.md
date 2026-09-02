@@ -493,6 +493,38 @@ Update, Defender signatures, the PowerShell 7 install, the Azure CLI) are
 reported as skipped
 rather than failing on permissions.
 
+## Moving off the Store PowerShell 7
+
+winget has installed PowerShell as a Store (MSIX) package by default since
+7.6, and that package is the install everything else works around: a packaged
+pwsh cannot run elevated at all, its install path carries the version and
+stops existing at the next update, and its execution alias is a zero-byte
+reparse point Task Scheduler cannot launch.
+
+`Convert-PowerShell7ToMsi.ps1` moves a machine to the MSI install in one
+attended run, from Windows PowerShell:
+
+```powershell
+$mover = Join-Path $env:TEMP 'Convert-PowerShell7ToMsi.ps1'
+Invoke-WebRequest https://raw.githubusercontent.com/briankronberg/UpdateEverything/main/Convert-PowerShell7ToMsi.ps1 -OutFile $mover -UseBasicParsing
+Unblock-File $mover
+powershell -NoProfile -ExecutionPolicy Bypass -File $mover
+```
+
+It installs the current MSI release straight from the PowerShell project --
+not through winget, which would hand back the package being removed --
+verifies the installed pwsh answers, and only then removes the Store package
+and its provisioning. Windows Terminal's default profile is pointed at the
+MSI install when the old default would disappear with the package, with the
+settings.json backup and validation this module's Terminal step uses.
+
+Nothing needs moving by hand: profiles, per-user modules and command history
+live under `Documents\PowerShell` and `%APPDATA%`, which both installs read.
+Scheduled tasks that run a `WindowsApps` pwsh are listed for re-registration
+against the MSI path rather than edited. `-ReportOnly` shows all of this and
+changes nothing; the real run asks once before acting, and `-Force` skips
+the question.
+
 ## Logs
 
 The module writes logs to the first writable location among `%USERPROFILE%`,
@@ -689,6 +721,7 @@ src/UpdateEverything.psm1     loader, dot-sources Public and Private
 src/Public/                   the five exported functions, one per file
 src/Private/                  internal helpers, one per file
 Install.ps1                   installs the module from a clone
+Convert-PowerShell7ToMsi.ps1  moves a machine from the Store PowerShell 7 to the MSI
 Publish.ps1                   validates and publishes to the PowerShell Gallery
 test.ps1                      test runner, used locally and by CI
 tests/                        Pester 6 suite
