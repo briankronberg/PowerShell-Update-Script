@@ -38,3 +38,15 @@ jobs:
         with:
           name: test-results
           path: testResults.xml
+
+  # Pester 6 requires PowerShell 7, so the suite above never executes the run
+  # path under the module's other supported host. This job does: import under
+  # powershell.exe and take the read-only inventory pass end to end.
+  windows-powershell:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Smoke test under Windows PowerShell 5.1
+        shell: powershell
+        run: .\tests\WindowsPowerShell\Invoke-WindowsPowerShellSmoke.ps1
