@@ -634,11 +634,19 @@ Describe 'Update-Everything' -Tag 'Static' {
 
 Describe 'Repository documentation' -Tag 'Docs' {
 
+    # The count comes from the function rather than a live probe: with command
+    # lookup shadowed to resolve nothing, every tool reports absent, no version
+    # command executes, and one record per catalogue entry still comes out.
     It 'shows an inventory sample sized to the real catalogue' {
         $readme = Get-Content (Join-Path $script:RepoRoot 'README.md') -Raw
         $readme -match 'of (\d+) tools present' | Should-BeTrue
-        [int]$Matches[1] |
-            Should-Be @(& (Get-Module UpdateEverything) { Get-UpdateToolInventory }).Count
+        [int]$documented = $Matches[1]
+
+        $catalogue = & (Get-Module UpdateEverything) {
+            function Get-Command { }
+            Get-UpdateToolInventory
+        }
+        $documented | Should-Be @($catalogue).Count
     }
 
     It 'README documents -<Name>' -ForEach $ExpectedParameters {

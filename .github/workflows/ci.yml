@@ -15,6 +15,12 @@ jobs:
       - name: Install test dependencies
         shell: pwsh
         run: |
+          # Set-PSRepository throws rather than registering when a runner image
+          # arrives without the PSGallery registration, so restore the default
+          # registration before touching it.
+          if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+            Register-PSRepository -Default
+          }
           Set-PSRepository PSGallery -InstallationPolicy Trusted
           Install-Module Pester -MinimumVersion 6.0.0 -Scope CurrentUser -Force -SkipPublisherCheck
           Install-Module PSScriptAnalyzer -Scope CurrentUser -Force
