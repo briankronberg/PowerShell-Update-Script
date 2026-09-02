@@ -65,7 +65,9 @@ if ($CI) {
     $config.TestResult.OutputPath = Join-Path $PSScriptRoot 'testResults.xml'
 }
 
-# No CodeCoverage: measuring it means executing the code under test, and the
-# code under test elevates, installs software and can reboot the machine.
+# No CodeCoverage in the runner: the entry point is tested statically, so a
+# coverage gate would either fail forever or pressure a test into executing
+# code that elevates, installs software and reboots. CONTRIBUTING shows the
+# one-off measurement used to map untested branches.
 
 Invoke-Pester -Configuration $config
