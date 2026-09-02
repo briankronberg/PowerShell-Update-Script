@@ -414,6 +414,29 @@ A test that registers a real task should register it once and assert several
 times, in a `Context` with the registration in `BeforeAll`. Two tests that each
 register the same cadence pay the full 6.6s twice for the same task.
 
+### Measuring coverage
+
+There is no coverage gate, and `test.ps1` never measures it: `Update-Everything`
+itself is tested statically, so its commands can never execute under the suite,
+and a percentage target would either fail forever or pressure a test into
+running code that elevates, installs and reboots.
+
+The map is still worth drawing when hunting for untested branches:
+
+```powershell
+$config = New-PesterConfiguration
+$config.Run.Path             = '.\tests'
+$config.CodeCoverage.Enabled = $true
+$config.CodeCoverage.Path    = '.\src'
+Invoke-Pester -Configuration $config
+```
+
+Read the per-file numbers, not the total. Dark on purpose: `Update-Everything.ps1`
+(static-tested), `Request-InstallConsent` and `Read-TimedChoice`'s wait loop
+(both need a real console host), `Invoke-SelfElevation`'s relaunch (the attended
+elevation harness exercises it live), and the psm1's platform guards. A gap
+anywhere else is a finding — #93 and #94 each came from exactly this reading.
+
 ### Ways a test here has passed while the code was broken
 
 Each of these produced a green suite over a real defect. Worth knowing before

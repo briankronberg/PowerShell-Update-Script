@@ -746,8 +746,11 @@ in the module, since that would end the session of whoever called it.
 The behavioural checks dot-source the module's files individually and call the
 private helpers directly. File work goes to `TestDrive`, `LOCALAPPDATA` is
 redirected there while the Windows Terminal tests run, and registry probes are
-mocked. There is no coverage metric, since measuring it means executing the code
-under test.
+mocked. There is no coverage gate: the entry point is tested statically, so
+its lines never execute under the suite, and a percentage target would push a
+test into running code that elevates, installs and reboots. Coverage is still
+measured as a one-off map when hunting untested branches; CONTRIBUTING shows
+how.
 
 `Set-StrictMode` is left out on purpose. It makes reading a missing property
 fatal, and the module has to probe for optional keys in Windows Terminal's

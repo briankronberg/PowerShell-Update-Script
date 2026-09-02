@@ -475,6 +475,15 @@ Describe 'Format-LastRunResult' -Tag 'Unit' {
 
 Describe 'Get-PowerShellHostPath' -Tag 'Unit' {
 
+    # When the MSI path is absent and no unpackaged host resolves, the task
+    # gets the process running this script rather than nothing.
+    It 'falls back to the process running these tests when nothing resolves' {
+        Mock Test-Path { $false }
+        Mock Get-Command { }
+
+        Get-PowerShellHostPath | Should-Be (Get-Process -Id $PID).Path
+    }
+
     # This path is baked into a scheduled task, so it has to still exist months
     # later. A packaged pwsh resolves to
     # ...\WindowsApps\Microsoft.PowerShell_7.6.5.0_x64__8wekyb3d8bbwe\pwsh.exe,
