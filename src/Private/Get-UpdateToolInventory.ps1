@@ -72,11 +72,14 @@ function Get-UpdateToolInventory {
     foreach ($tool in $Catalogue) {
         $resolved = @(Get-Command $tool.Command -CommandType Application -ErrorAction SilentlyContinue)
         # First-occurrence order is PATH-resolution order, so the first entry is
-        # the copy that actually runs.
+        # the copy that actually runs. Dedupe case-insensitively: a Windows PATH
+        # routinely carries the same directory in different casing across its
+        # machine and user segments, and Select-Object -Unique is case-sensitive.
+        $seen = [System.Collections.Generic.HashSet[string]]::new(
+            [System.StringComparer]::OrdinalIgnoreCase)
         $places = @($resolved |
             ForEach-Object { Split-Path $_.Source -Parent } |
-            Where-Object { $_ } |
-            Select-Object -Unique)
+            Where-Object { $_ -and $seen.Add($_) })
 
         if (-not $resolved.Count) {
             [pscustomobject]@{

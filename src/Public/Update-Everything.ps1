@@ -10,12 +10,13 @@
         the rest. Every step writes its own log, and the run ends with a summary
         table and a result object.
 
-        Steps cover winget and the Microsoft Store, Windows Update through
-        PSWindowsUpdate, Microsoft 365 Apps, Defender signatures, PowerShell
-        modules and help, Chocolatey, Scoop, Python, uv, pip, pipx, npm, Deno,
+        Steps cover an inventory pass, winget and the Microsoft Store, Windows
+        Update through PSWindowsUpdate, Microsoft 365 Apps, Defender signatures,
+        the PowerShell Gallery (trust and its client tooling), PowerShell modules
+        and help, Chocolatey, Scoop, Python, uv, pip, pipx, conda, npm, Deno,
         Bun, pnpm, rustup, cargo binaries, Go binaries, dotnet, GitHub CLI
-        extensions, the Azure and Google Cloud CLIs, conda, the WSL kernel,
-        PowerShell 7 itself and the Windows Terminal default profile. The README
+        extensions, the Azure and Google Cloud CLIs, the WSL kernel, PowerShell 7
+        itself, this module, and the Windows Terminal default profile. The README
         lists what each runs.
 
         Presence of an executable is not proof a feature is installed, and package
@@ -139,11 +140,11 @@
         warning has scrolled well out of sight.
 
     .PARAMETER UpdateSelf
-        Update this module, and run nothing else: a shortcut for Install-Module
-        UpdateEverything -Force, or for the Main installer with
-        -UpdateSelfSource Main. Default: $false. -Tag and -ExcludeTag are
-        ignored for the run, and elevation is never requested, because a
-        CurrentUser install needs none.
+        Update this module through Update-Module (or the Main installer with
+        -UpdateSelfSource Main), and run nothing else. Default: $false. -Tag and
+        -ExcludeTag are ignored for the run, and no UAC prompt is raised: a
+        per-user copy updates in place, and an all-users copy reports that it
+        needs an elevated session rather than failing silently.
 
         The new version takes effect on the *next* run. This module is already
         loaded by the time the step runs: the files on disk are replaced, and
@@ -297,10 +298,10 @@
         Write-Warning "Transcript unavailable ($($_.Exception.Message)); per-step logs are unaffected."
     }
 
-    # -UpdateSelf is a shortcut: update this module and run nothing else. The
-    # self step needs no elevation -- the gallery path is Install-Module -Scope
-    # CurrentUser and the Main installer writes to the user's modules -- so the
-    # run skips the UAC prompt and narrows the tag filter to Self.
+    # -UpdateSelf is a shortcut: update this module and run nothing else, so the
+    # tag filter narrows to Self. No UAC prompt is raised -- a per-user copy
+    # updates without one, and the self step reports when an all-users copy
+    # would need an elevated session rather than raising a prompt mid-run.
     if ($UpdateSelf) {
         if ($Tag.Count -or $ExcludeTag.Count) {
             Write-Warning '-UpdateSelf updates only this module; -Tag and -ExcludeTag are ignored for this run.'
@@ -490,25 +491,40 @@
     # ---------------------------------------------------------------------------
     # 1b. The module itself
     # ---------------------------------------------------------------------------
-    if ($UpdateSelf) {
+    if ($UpdateSelf -or ($script:TagFilter -contains 'Self')) {
         Invoke-Step -Name 'UpdateEverything (self)' -Tag 'Self' -Action {
             if ($UpdateSelfSource -eq 'Gallery') {
                 $status = Get-GalleryModuleStatus -Name 'UpdateEverything'
 
-                if (-not $status.Available) {
+                if (-not $status.Installed) {
+                    Write-Output "UpdateEverything is running from a copy that is not under a module path, so Update-Module has nothing to move. Install-Module UpdateEverything -Force installs the gallery copy."
+                } elseif (-not $status.Available) {
                     Write-Output "UpdateEverything $($status.Installed) is installed; the gallery could not be asked about it."
+                } elseif ($status.Receipted -and -not $status.Updatable) {
+                    # A gallery-installed copy is present but older than the copy
+                    # running now, which the gallery did not install. Update-Module
+                    # would move the older lineage, not this one.
+                    Write-Output "UpdateEverything $($status.Installed) is running from a copy the gallery did not install; the gallery-installed copy beside it is older. Use -UpdateSelfSource Main, or Install-Module UpdateEverything -Force to move to the gallery copy."
                 } elseif (-not $status.Updatable) {
-                    # A copy the GitHub installer put there was not installed by
-                    # PowerShellGet, so Update-Module refuses it. -UpdateSelfSource
-                    # Main is the matching path.
+                    # No PowerShellGet receipt at all -- the GitHub installer put it
+                    # there, so Update-Module refuses it. -UpdateSelfSource Main is
+                    # the matching path.
                     Write-Output "UpdateEverything $($status.Installed) was not installed from the gallery, so Update-Module cannot move it. The published version is $($status.Available)."
                     Write-Output 'Use -UpdateSelfSource Main to track the branch it came from, or Install-Module UpdateEverything -Force to switch to the gallery copy.'
                 } elseif (-not $status.NeedsUpdate) {
                     Write-Output "UpdateEverything $($status.Installed) is the newest published release."
                 } else {
                     Write-Output "UpdateEverything $($status.Installed) -> $($status.Available)..."
-                    Update-Module -Name 'UpdateEverything' -Force -Confirm:$false -ErrorAction Stop
-                    Write-Output 'Updated. The new version loads on the next run; this one continues on the code already in memory.'
+                    try {
+                        Update-Module -Name 'UpdateEverything' -Force -Confirm:$false -ErrorAction Stop
+                        Write-Output 'Updated. The new version loads on the next run; this one continues on the code already in memory.'
+                    } catch {
+                        if ("$_" -match 'Administrator rights|elevated') {
+                            Write-Output 'UpdateEverything is installed for all users, so updating it needs Administrator rights. Run "Update-Module UpdateEverything -Force" from an elevated PowerShell.'
+                        } else {
+                            throw
+                        }
+                    }
                 }
                 return
             }
@@ -540,7 +556,7 @@
             }
         }
     } else {
-        Add-SkippedStep -Name 'UpdateEverything (self)' -Reason 'not requested (-UpdateSelf)'
+        Add-SkippedStep -Name 'UpdateEverything (self)' -Reason 'not requested (pass -UpdateSelf or -Tag Self)'
     }
 
     # ---------------------------------------------------------------------------
@@ -911,11 +927,14 @@
             # Nothing left but an install: either absent, or a shipped copy that
             # can only be replaced side by side.
             if ($status.Installed -and $status.Installed -ge $status.Available) {
-                Write-Output "$name $($status.Installed) shipped with this host and is not behind the gallery; leaving it alone."
+                $why = if ($status.Receipted) { 'is not behind the gallery' } else { 'shipped with this host and is not behind the gallery' }
+                Write-Output "$name $($status.Installed) $why; leaving it alone."
                 continue
             }
 
-            $what = if ($status.Installed) {
+            $what = if ($status.Receipted) {
+                "$name $($status.Installed) has a gallery receipt for an older version, so Update-Module would move that older copy rather than the one running. Installing $($status.Available) fresh is the way forward"
+            } elseif ($status.Installed) {
                 "$name $($status.Installed) is the copy this PowerShell shipped with, which cannot be updated in place. Installing $($status.Available) alongside it is the only way forward"
             } else {
                 "$name is not installed. It is the current PowerShell Gallery client, and installing it changes which client every later module update uses. This would install $($status.Available)"
@@ -1021,13 +1040,28 @@
         } elseif (Get-Command py -ErrorAction SilentlyContinue) {
             # Two tools answer to py: the Install Manager's alias, which has an
             # install subcommand, and the classic launcher, which treats a bare
-            # word as a script path and errors. "py help install" tells them
-            # apart without changing anything: the alias exits 0, the launcher
-            # cannot open a script named help and does not.
-            $null = & py help install 2>&1
-            if ($LASTEXITCODE -ne 0) {
+            # word as a script path. "py help install" tells them apart -- the
+            # alias exits 0; the launcher cannot open a script named help.
+            #
+            # Run the probe from SystemRoot so the launcher cannot instead run a
+            # 'help' or 'install' file that happens to sit in the working
+            # directory, and catch a py that resolves but cannot start (a stale
+            # execution alias) rather than trusting a left-over exit code.
+            $isManager = $false
+            Push-Location $env:SystemRoot
+            try {
                 $global:LASTEXITCODE = 0
-                Stop-StepAsSkipped -Reason 'py here is the classic launcher, which cannot update runtimes; the Python Install Manager replaces it'
+                $null = & py help install 2>&1
+                $isManager = ($LASTEXITCODE -eq 0)
+            } catch {
+                $isManager = $false
+            } finally {
+                Pop-Location
+                $global:LASTEXITCODE = 0
+            }
+
+            if (-not $isManager) {
+                Stop-StepAsSkipped -Reason 'py here is the classic launcher or could not start; the Python Install Manager is what updates runtimes'
             }
             py install --update
         } else {
@@ -1115,22 +1149,34 @@
         pipx upgrade-all
     }
 
-    # ---------------------------------------------------------------------------
-    # 5. Node / npm
-    # ---------------------------------------------------------------------------
     # conda updates conda itself in the base environment and nothing else.
     # Environments hold project package sets, and "conda update --all" is the
     # operation the pip step's rule declines: upgrading one package can silently
     # downgrade another's dependency.
     Invoke-Step -Name 'conda' -RequiresCommand 'conda' -Tag 'Python' -Action {
+        # Self-update only what nothing else manages: a scoop- or winget-installed
+        # conda is moved by that manager's own step.
+        $owner = Get-ToolInstallSource -Name 'conda'
+        if ($owner -notin 'Standalone', 'Unknown') {
+            Stop-StepAsSkipped -Reason "conda is managed by $owner, which updates it in its own step"
+        }
+
         $output = conda update --name base conda --yes 2>&1
         $output
         if ($LASTEXITCODE -ne 0) {
-            Write-Error "conda update failed with exit code $LASTEXITCODE. conda's own message is in this step's log."
-            $global:LASTEXITCODE = 0
+            if (($output | Out-String) -match 'NotWritable|permission') {
+                Write-Output 'conda declined to update its base environment; it is installed for all users and needs an elevated session.'
+                $global:LASTEXITCODE = 0
+            } else {
+                Write-Error "conda update failed with exit code $LASTEXITCODE. conda's own message is in this step's log."
+                $global:LASTEXITCODE = 0
+            }
         }
     }
 
+    # ---------------------------------------------------------------------------
+    # 5. Node / npm
+    # ---------------------------------------------------------------------------
     Invoke-Step -Name 'npm' -RequiresCommand 'npm' -Tag 'Node' -Action {
         # npm writes progress and deprecation notices to stderr as a matter of
         # course, so judge it by exit code. Output is captured as well as passed

@@ -46,10 +46,12 @@ function Format-SelfVersionStatus {
     $available = [version] $Status.Available
 
     if ($Running -lt $available) {
-        $how = if ($Status.Installed -and -not $Status.Updatable) {
+        $how = if (-not $Status.Installed) {
+            'This copy is running from outside a module path, so use "Install-Module UpdateEverything -Force" to install the gallery copy.'
+        } elseif (-not $Status.Updatable) {
             'This copy did not come from the gallery, so use "Install-Module UpdateEverything -Force", or -UpdateSelf -UpdateSelfSource Main to track the branch it came from.'
         } else {
-            'Run with -UpdateSelf to install it.'
+            'Run with -UpdateSelf to update it.'
         }
         return "UpdateEverything $Running is running; $available is published. $how"
     }
