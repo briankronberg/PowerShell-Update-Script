@@ -53,7 +53,7 @@ function Add-Check {
     $colour = if ($Passed) { 'Green' } else { 'Red' }
     Write-Host ("  [{0}] {1}" -f $status, $Name) -ForegroundColor $colour
     if ($Detail) { Write-Host ("         {0}" -f $Detail) -ForegroundColor DarkGray }
-    $script:Checks.Add([pscustomobject]@{ Name = $Name; Passed = $Passed; Detail = $Detail })
+    $script:Checks.Add([pscustomobject]@{ Name = $Name; Status = $status; Passed = $Passed; Detail = $Detail })
 }
 
 if (-not $Version) {
@@ -65,12 +65,14 @@ $stage = Join-Path ([System.IO.Path]::GetTempPath()) ('UE-GalleryValidation-{0:y
 $null = New-Item -ItemType Directory -Path $stage -Force
 
 try {
-    Save-Module -Name UpdateEverything -RequiredVersion $Version -Path $stage -Repository PSGallery
+    # -Force so an untrusted PSGallery (the shipped default) does not stop the
+    # download on a Y/N prompt. It suppresses only the prompt, not repo state.
+    Save-Module -Name UpdateEverything -RequiredVersion $Version -Path $stage -Repository PSGallery -Force
 
     $manifestPath = Join-Path $stage "UpdateEverything\$Version\UpdateEverything.psd1"
     Add-Check 'the gallery served the requested version' (Test-Path -LiteralPath $manifestPath) $manifestPath
 
-    $manifest = Test-ModuleManifest -Path $manifestPath
+    $manifest = Test-ModuleManifest -Path $manifestPath -ErrorAction SilentlyContinue
     Add-Check 'the manifest validates' ($null -ne $manifest) "version $($manifest.Version)"
     Add-Check 'the manifest carries the six exports' ($manifest.ExportedFunctions.Count -eq 6) `
         "$($manifest.ExportedFunctions.Count) exported"
@@ -88,7 +90,7 @@ try {
 
     # Inventory reads the machine and changes nothing. Merging stream 6 puts the
     # banner lines and the result object in one pipeline; the type separates them.
-    $mixed = @(Update-Everything -Tag Inventory -LogRetentionDays 0 6>&1)
+    $mixed = @(Update-Everything -Tag Inventory -SkipElevation -LogRetentionDays 0 6>&1)
     $banner = @($mixed | Where-Object { $_ -is [System.Management.Automation.InformationRecord] } |
         ForEach-Object { "$_" })
     $run = $mixed | Where-Object { $_ -isnot [System.Management.Automation.InformationRecord] } |
@@ -104,14 +106,21 @@ try {
         "FailedCount=$($run.FailedCount)"
 
     if ($IncludeSelfUpdate) {
-        $self = Update-Everything -UpdateSelf -LogRetentionDays 0 6>$null
+        # -Tag Self -SkipElevation pins the narrow, no-elevation behavior even
+        # on a downloaded version older than 1.4.0, where -UpdateSelf alone still
+        # meant "self-update and then the whole maintenance run".
+        $self = Update-Everything -UpdateSelf -Tag Self -SkipElevation -LogRetentionDays 0 6>$null
         $ok = @($self.Steps | Where-Object { $_.Status -eq 'OK' })
 
         Add-Check 'with -UpdateSelf, the self step is the only one that runs' (
             $ok.Count -eq 1 -and $ok[0].Step -eq 'UpdateEverything (self)') `
             (($ok.Step) -join ', ')
-        Add-Check 'the -UpdateSelf run failed nothing' ($self.FailedCount -eq 0) "FailedCount=$($self.FailedCount)"
+        Add-Check 'the -UpdateSelf run failed nothing' ($self.FailedCount -is [int] -and $self.FailedCount -eq 0) "FailedCount=$($self.FailedCount)"
     }
+} catch {
+    # Record the failure as a check so the summary and result object still print
+    # -- the harness exists to report a verdict, not to abort on the first throw.
+    Add-Check 'validation completed without an unexpected error' $false "$_"
 } finally {
     Get-Module -Name UpdateEverything | Remove-Module -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue

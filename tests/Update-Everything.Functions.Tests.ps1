@@ -1680,12 +1680,17 @@ Describe 'Every step declares a tag' -Tag 'Static' {
             ForEach-Object { $_.ValidValues })
     }
 
-    It 'validates the same tag set on both entry points' {
-        $register = @((Get-Command Register-UpdateEverythingTask).Parameters['Tag'].Attributes |
+    It 'validates the same tag set on <_> of both entry points' -ForEach @('Tag', 'ExcludeTag') {
+        $parameter = $_
+        $register = @((Get-Command Register-UpdateEverythingTask).Parameters[$parameter].Attributes |
+            Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } |
+            ForEach-Object { $_.ValidValues })
+        $update = @((Get-Command Update-Everything).Parameters[$parameter].Attributes |
             Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } |
             ForEach-Object { $_.ValidValues })
 
         $register | Should-BeCollection $script:DeclaredTags
+        $update   | Should-BeCollection $script:DeclaredTags
     }
 
     It 'found the steps to check' {
@@ -1937,7 +1942,7 @@ Describe '-UpdateSelf runs only the self step' -Tag 'Static' {
         $script:Guard | Should-MatchString "\`$ExcludeTag = @\(\)"
     }
 
-    It 'skips elevation, which a CurrentUser install never needs' {
+    It 'skips the elevation prompt for the self-update' {
         $script:Guard | Should-MatchString "\`$SkipElevation = \`$true"
     }
 

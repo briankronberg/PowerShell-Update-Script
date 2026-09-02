@@ -5,7 +5,8 @@ function Get-GalleryModuleStatus {
         the PowerShell Gallery.
 
         .DESCRIPTION
-        Returns Name, Installed, Available, Updatable and NeedsUpdate.
+        Returns Name, Installed, Available, Receipted, Updatable and
+        NeedsUpdate.
 
         Installed is $null when the module is absent. Absent means any install
         is a new install and needs consent; present but old means an update,
@@ -54,12 +55,22 @@ function Get-GalleryModuleStatus {
     # to cover the newest installed copy, the one Installed names. A machine can
     # carry a receipted older version beside a GitHub-installed newer one, and
     # Update-Module moves only the receipted lineage.
+    # Receipted is whether a PowerShellGet receipt exists at all; Updatable is
+    # the stricter test that the receipt covers the newest installed copy, the
+    # one Installed names. A machine can carry a receipted older version beside
+    # an unreceipted newer one, and Update-Module moves only the receipted
+    # lineage -- so a caller distinguishes "no gallery lineage" (not Receipted)
+    # from "gallery lineage, but behind the copy running" (Receipted, not
+    # Updatable).
+    $receipted = $false
     $updatable = $false
     if ($present.Count -and (Get-Command Get-InstalledModule -ErrorAction SilentlyContinue)) {
         $receipt = Get-InstalledModule -Name $Name -ErrorAction SilentlyContinue
         if ($receipt) {
+            $receipted = $true
             $raw = "$($receipt.Version)" -replace '-.*$', ''
-            $updatable = [bool] ($raw -and ([version] $raw -eq $installed))
+            $parsed = $null
+            $updatable = [bool] ($raw -and [version]::TryParse($raw, [ref] $parsed) -and $parsed -eq $installed)
         }
     }
 
@@ -88,7 +99,8 @@ function Get-GalleryModuleStatus {
         # versions and a [version] on others, and a prerelease carries a suffix
         # that [version] cannot parse. Trim the suffix and let the cast decide.
         $raw = "$($found.Version)" -replace '-.*$', ''
-        if ($raw) { $available = [version] $raw }
+        $parsedAvailable = $null
+        if ($raw -and [version]::TryParse($raw, [ref] $parsedAvailable)) { $available = $parsedAvailable }
     } else {
         Write-Verbose "The gallery had no answer for ${Name}; it may be absent or unreachable."
     }
@@ -97,6 +109,7 @@ function Get-GalleryModuleStatus {
         Name        = $Name
         Installed   = $installed
         Available   = $available
+        Receipted   = $receipted
         Updatable   = $updatable
         NeedsUpdate = [bool] ($installed -and $available -and $available -gt $installed)
     }

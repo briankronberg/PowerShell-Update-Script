@@ -30,8 +30,11 @@ function New-TaskFromPrompt {
         [switch] $Replace
     )
 
-    $tags = @('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python',
-              'Node', 'DotNet', 'Rust', 'Git', 'Self', 'Inventory')
+    # Read the tag names from the cmdlet that will validate them, so this list
+    # cannot drift from the ValidateSet the way a hand-kept copy would.
+    $tags = @((Get-Command Register-UpdateEverythingTask).Parameters['Tag'].Attributes |
+        Where-Object { $_ -is [System.Management.Automation.ValidateSetAttribute] } |
+        ForEach-Object { $_.ValidValues })
 
     if (-not $DefaultName) {
         # Update-Everything, then Update-Everything-2 and up. Named after what

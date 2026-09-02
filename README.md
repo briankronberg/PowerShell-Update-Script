@@ -259,7 +259,7 @@ thing that crosses a process boundary.
 | `-Tag` | *(all)* | Run only the steps carrying one of these tags. Everything else is reported as skipped. |
 | `-ExcludeTag` | *(none)* | Run everything except the steps carrying one of these tags. Exclusion wins when both are given. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
-| `-UpdateSelf` | off | Update this module and run nothing else — a shortcut for `Install-Module UpdateEverything -Force`. Skips elevation, and `-Tag`/`-ExcludeTag` are ignored. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. |
+| `-UpdateSelf` | off | Update this module through `Update-Module` and run nothing else. `-Tag`/`-ExcludeTag` are ignored; no UAC prompt is raised, and an all-users copy is reported as needing an elevated session. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. |
 | `-UpdateSelfSource` | `Gallery` | Where `-UpdateSelf` gets it from. `Gallery` is the newest published release; `Main` is the development head, fetched from GitHub. |
 
 ## Selecting steps
@@ -346,7 +346,7 @@ rest, a package manager's own inventory decides.
 
 `winget upgrade --all` returns one exit code for the whole pass, so a partial
 failure says only that *something* did not upgrade. The step names them, and
-separates the two cases:
+separates three cases:
 
 ```
 Still out of date after this run:
@@ -357,11 +357,15 @@ Not upgradable on this machine, and expected to stay that way:
   Cisco.CiscoWebexMeetings 45.6.4 -> 45.6.4.8  (winget listed it and did not
                                    attempt it, usually because the newer
                                    package does not apply to this system)
+
+Newly listed during this run; the next run picks these up:
+  Some.Package 1.0 -> 1.1
 ```
 
 The distinction matters. The first is worth doing something about; the second
 will not change until the vendor ships a package that applies, and reporting it
 as a failure on every run is how people learn to skim past the ones that are.
+The third only appeared in the closing table, so the next run is when it moves.
 
 **The step is marked `Warning` only when something may really have failed** — a
 package winget attempted, or a non-zero exit it could not attribute to one. A
@@ -396,7 +400,7 @@ choose the packages; the manager's own inventory does.
 
 | Manager | Found by | What runs | Covers |
 |---|---|---|---|
-| winget | `winget` on `PATH` | `winget source update`, then `winget upgrade --all --include-unknown --silent --accept-source-agreements --accept-package-agreements --disable-interactivity` | Desktop applications from the winget community repository and the Microsoft Store. The broadest step by far, covering browsers, editors, runtimes and drivers shipped as apps. The `--accept-*` flags accept source and vendor licence agreements on your behalf. |
+| winget | `winget` on `PATH` | `winget source update --disable-interactivity`, then `winget upgrade --all --include-unknown --silent --accept-source-agreements --accept-package-agreements --disable-interactivity` | Desktop applications from the winget community repository and the Microsoft Store. The broadest step by far, covering browsers, editors, runtimes and drivers shipped as apps. The `--accept-*` flags accept source and vendor licence agreements on your behalf. |
 | Chocolatey | `choco` | `choco upgrade all -y` | Everything installed as a Chocolatey package. Exit codes 1641 and 3010 pass, since those are the MSI "reboot required" codes rather than failures. |
 | Scoop | `scoop` | `scoop update`, `scoop update *`, `scoop cleanup *`, each run on its own | Scoop, its buckets, installed apps, then old versions. The phases run separately so a broken bucket cannot hide the rest. |
 | npm | `npm` | `npm install -g npm@latest`, then `npm update -g` only with `-UpdateGlobalNpm` | npm itself, every run. Global packages only on request, because upgrading them can move a pinned toolchain. |
@@ -442,7 +446,7 @@ rather than going quiet.
 
 ### Python
 
-Four steps, and they cover different things:
+Five steps, and they cover different things:
 
 | Step | Updates |
 |---|---|
@@ -485,7 +489,8 @@ tries to elevate anyway. Treating "unknown" as "no" would lock out real
 administrators, which is the worse mistake.
 
 With `-SkipElevation`, the run proceeds and the admin-only steps (Windows
-Update, Defender signatures, the PowerShell 7 install) are reported as skipped
+Update, Defender signatures, the PowerShell 7 install, the Azure CLI) are
+reported as skipped
 rather than failing on permissions.
 
 ## Logs

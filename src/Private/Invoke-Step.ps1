@@ -38,21 +38,23 @@
     if (-not $safeName) { $safeName = 'step' }
     $stepLog = Join-Path $script:logDir "$safeName-$script:runStamp.log"
 
-    # Pre-check administrator rights
-    if ($RequiresAdmin -and -not $script:isAdmin) {
-        $msg = "SKIP  $Name (requires Administrator; this run is not elevated)"
-        Write-Host $msg -ForegroundColor DarkGray
-        Write-StepLog -Path $stepLog -Message $msg
-        $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = 0; Log = '' })
-        return
-    }
-
-    # Pre-check command availability
+    # Command availability is checked before administrator rights: an absent
+    # tool is absent whether or not the run is elevated, and reporting it as
+    # "requires Administrator" would send someone to elevate for a tool that is
+    # simply not installed.
     if ($RequiresCommand -and -not (Get-Command $RequiresCommand -ErrorAction SilentlyContinue)) {
         $msg = "SKIP  $Name (command '$RequiresCommand' not found)"
         Write-Host $msg -ForegroundColor DarkGray
         Write-StepLog -Path $stepLog -Message $msg
-        $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = 0; Log = '' })
+        $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = 0; Log = $stepLog })
+        return
+    }
+
+    if ($RequiresAdmin -and -not $script:isAdmin) {
+        $msg = "SKIP  $Name (requires Administrator; this run is not elevated)"
+        Write-Host $msg -ForegroundColor DarkGray
+        Write-StepLog -Path $stepLog -Message $msg
+        $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = 0; Log = $stepLog })
         return
     }
 
@@ -150,7 +152,7 @@
             $reason = $message -replace '^STEP-SKIPPED:\s*', ''
             Write-Host "SKIP  $Name ($reason)" -ForegroundColor DarkGray
             Write-StepLog -Path $stepLog -Message "SKIPPED | $reason"
-            $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = $secs; Log = '' })
+            $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Skipped'; Seconds = $secs; Log = $stepLog })
             return
         }
 

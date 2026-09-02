@@ -17,7 +17,7 @@
       "PowerShell(git log *)",
       "PowerShell(git diff *)",
       "PowerShell(git show *)",
-      "PowerShell(git branch *)",
+      "PowerShell(git branch)",
       "PowerShell(gh pr checks *)",
       "PowerShell(gh pr list *)",
       "PowerShell(gh pr view *)",
