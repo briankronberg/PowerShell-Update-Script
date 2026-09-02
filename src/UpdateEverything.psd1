@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.4.0'
+    ModuleVersion     = '1.4.1'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -32,46 +32,27 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.4.0
+            ReleaseNotes = '# 1.4.1
 
-One behaviour change to know about before upgrading, eight new update steps,
-and the fixes that shipped on GitHub as 1.3.1.
+One fix. GitHub-only: the gallery carries minor versions, and this lands
+there with 1.5.0.
 
-## -UpdateSelf now updates only this module
+## Updatable means the receipt covers the newest installed copy
 
-The switch is a shortcut for "Install-Module UpdateEverything -Force" (or the
-Main installer with -UpdateSelfSource Main): it updates the module and runs
-nothing else. -Tag and -ExcludeTag are ignored for that run, and no elevation
-is requested, because a CurrentUser install needs none.
+Get-GalleryModuleStatus answered Updatable from the existence of any
+PowerShellGet receipt for the module name. A gallery install followed by the
+GitHub one-liner leaves a receipted older version beside an unreceipted newer
+one, and the helper then called the newest copy updatable while Update-Module
+moves only the receipted lineage -- so the self-update step could describe an
+update it was not performing.
 
-In 1.3.0 the switch meant "also update the module during a full run". A
-scheduled task passing -UpdateSelf gets only the self-update after this
-upgrade -- give it a second task, or drop the switch, if it should keep doing
-both.
+Updatable is now true only when the receipt names the same version as the
+newest installed copy. On a mixed machine the self step takes the guidance
+branch instead, naming Install-Module -Force and -UpdateSelfSource Main,
+both of which do what they say there.
 
-## Eight new steps
-
-Deno, Bun and pnpm join npm under the Node tag, each behind the same
-ownership check as uv, so a copy a package manager installed is left to that
-manager. cargo binaries runs "cargo install-update --all" where the
-cargo-update crate is present, and Go binaries runs "gup update" -- both skip
-naming the missing prerequisite rather than installing it. The Azure and
-Google Cloud CLIs arrive under a new Cloud tag, so "-ExcludeTag Cloud" drops
-the pair on a metered or offline machine. conda updates conda itself in the
-base environment; environment packages are left alone for the same reason
-pip''s are.
-
-The tag set gains Go and Cloud, and the inventory covers 24 tools.
-
-## The 1.3.1 fixes, new to the gallery
-
-When a tool is installed twice, the warning now names the copy PATH actually
-resolves rather than the alphabetically first one. The Python step reports
-the classic py launcher as Skipped instead of Failed on machines without the
-Install Manager. A winget package listed for the first time during a run is
-reported as newly listed, not as permanently blocked. And a documentation
-pass held every README and help claim against the code, restoring the
-verbatim tool messages people grep for.
+Found by the new gallery-validation harness (tests/Gallery) on its first
+run, on a machine in exactly that mixed state.
 '
 
         }
