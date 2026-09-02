@@ -5,7 +5,7 @@ function Get-GalleryModuleStatus {
         the PowerShell Gallery.
 
         .DESCRIPTION
-        Returns Name, Installed, Available, Receipted, Updatable and
+        Returns Name, Installed, Available, Receipted, Updatable, Mover and
         NeedsUpdate.
 
         Installed is $null when the module is absent. Absent means any install
@@ -17,16 +17,21 @@ function Get-GalleryModuleStatus {
         a reason to reinstall. An update is never reported for a module that is
         not installed.
 
-        Updatable reports whether Update-Module can move this copy forward. It
-        refuses anything it did not install, answering "Module 'X' was not
-        installed by using Install-Module, so it cannot be updated" -- which
-        covers every module that shipped with the host, and any copy whose
-        receipt names an older version than the newest one installed, since
-        Update-Module moves only the receipted lineage. Windows PowerShell
-        ships PowerShellGet 1.0.0.1
-        under Program Files rather than $PSHOME, so the path is not the test;
-        whether PowerShellGet recorded the install is. Moving a shipped copy
-        forward is a side-by-side install, and so an install decision.
+        Updatable reports whether an installed gallery client can move this
+        copy forward, and Mover names the command that can -- Update-PSResource
+        or Update-Module -- or is $null. Both clients refuse anything they did
+        not install, which covers every module that shipped with the host, and
+        any copy whose receipt names an older version than the newest one
+        installed, since each client moves only its receipted lineage. Windows
+        PowerShell ships PowerShellGet 1.0.0.1 under Program Files rather than
+        $PSHOME, so the path is not the test; whether a client recorded the
+        install is. Moving a shipped copy forward is a side-by-side install,
+        and so an install decision.
+
+        Receipts come from both clients. PSResourceGet ships in the box with
+        PowerShell 7.4 and its receipts are invisible to Get-InstalledModule,
+        so a machine can hold a gallery-installed module that PowerShellGet
+        has never heard of.
 
         .PARAMETER Name
         The module to look up, on this machine and on the gallery.
@@ -49,28 +54,43 @@ function Get-GalleryModuleStatus {
         Sort-Object Version -Descending)
     $installed = if ($present.Count) { [version] $present[0].Version } else { $null }
 
-    # Ask PowerShellGet what it installed, rather than inferring it from the
-    # path. Get-InstalledModule reports only what came through Install-Module,
-    # which is exactly the set Update-Module will act on -- and the receipt has
-    # to cover the newest installed copy, the one Installed names. A machine can
-    # carry a receipted older version beside a GitHub-installed newer one, and
-    # Update-Module moves only the receipted lineage.
-    # Receipted is whether a PowerShellGet receipt exists at all; Updatable is
-    # the stricter test that the receipt covers the newest installed copy, the
-    # one Installed names. A machine can carry a receipted older version beside
-    # an unreceipted newer one, and Update-Module moves only the receipted
-    # lineage -- so a caller distinguishes "no gallery lineage" (not Receipted)
-    # from "gallery lineage, but behind the copy running" (Receipted, not
-    # Updatable).
+    # Ask the gallery clients what they installed, rather than inferring it
+    # from the path. Each reader reports only what its client installed, which
+    # is exactly the set its Update-* command will act on -- and a receipt has
+    # to cover the newest installed copy, the one Installed names. A machine
+    # can carry a receipted older version beside a GitHub-installed newer one,
+    # and each client moves only its receipted lineage -- so a caller
+    # distinguishes "no gallery lineage" (not Receipted) from "gallery
+    # lineage, but behind the copy running" (Receipted, not Updatable).
+    #
+    # PSResourceGet is asked first: it reads PowerShellGet's receipts as well
+    # as its own, so its answer exists more often, and Update-PSResource is
+    # then the client that moves the copy.
     $receipted = $false
     $updatable = $false
-    if ($present.Count -and (Get-Command Get-InstalledModule -ErrorAction SilentlyContinue)) {
-        $receipt = Get-InstalledModule -Name $Name -ErrorAction SilentlyContinue
-        if ($receipt) {
+    $mover = $null
+    if ($present.Count) {
+        foreach ($client in @(
+                @{ Reader = 'Get-InstalledPSResource'; Mover = 'Update-PSResource' }
+                @{ Reader = 'Get-InstalledModule';     Mover = 'Update-Module' }
+            )) {
+            if (-not (Get-Command $client.Reader -ErrorAction SilentlyContinue)) { continue }
+
+            # PSResourceGet lists every installed version, not just the newest.
+            $receipts = @(& $client.Reader -Name $Name -ErrorAction SilentlyContinue)
+            if (-not $receipts.Count) { continue }
             $receipted = $true
-            $raw = "$($receipt.Version)" -replace '-.*$', ''
-            $parsed = $null
-            $updatable = [bool] ($raw -and [version]::TryParse($raw, [ref] $parsed) -and $parsed -eq $installed)
+
+            foreach ($receipt in $receipts) {
+                $raw = "$($receipt.Version)" -replace '-.*$', ''
+                $parsed = $null
+                if ($raw -and [version]::TryParse($raw, [ref] $parsed) -and $parsed -eq $installed) {
+                    $updatable = $true
+                    $mover = $client.Mover
+                    break
+                }
+            }
+            if ($mover) { break }
         }
     }
 
@@ -111,6 +131,7 @@ function Get-GalleryModuleStatus {
         Available   = $available
         Receipted   = $receipted
         Updatable   = $updatable
+        Mover       = $mover
         NeedsUpdate = [bool] ($installed -and $available -and $available -gt $installed)
     }
 }

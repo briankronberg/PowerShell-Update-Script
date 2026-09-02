@@ -497,30 +497,41 @@
                 $status = Get-GalleryModuleStatus -Name 'UpdateEverything'
 
                 if (-not $status.Installed) {
-                    Write-Output "UpdateEverything is running from a copy that is not under a module path, so Update-Module has nothing to move. Install-Module UpdateEverything -Force installs the gallery copy."
+                    Write-Output "UpdateEverything is running from a copy that is not under a module path, so an update command has nothing to move. Install-Module UpdateEverything -Force installs the gallery copy."
                 } elseif (-not $status.Available) {
                     Write-Output "UpdateEverything $($status.Installed) is installed; the gallery could not be asked about it."
                 } elseif ($status.Receipted -and -not $status.Updatable) {
                     # A gallery-installed copy is present but older than the copy
-                    # running now, which the gallery did not install. Update-Module
-                    # would move the older lineage, not this one.
+                    # running now, which the gallery did not install. The receipted
+                    # update would move the older lineage, not this one.
                     Write-Output "UpdateEverything $($status.Installed) is running from a copy the gallery did not install; the gallery-installed copy beside it is older. Use -UpdateSelfSource Main, or Install-Module UpdateEverything -Force to move to the gallery copy."
                 } elseif (-not $status.Updatable) {
                     # No PowerShellGet receipt at all -- the GitHub installer put it
                     # there, so Update-Module refuses it. -UpdateSelfSource Main is
                     # the matching path.
-                    Write-Output "UpdateEverything $($status.Installed) was not installed from the gallery, so Update-Module cannot move it. The published version is $($status.Available)."
+                    Write-Output "UpdateEverything $($status.Installed) was not installed from the gallery, so no update command can move it. The published version is $($status.Available)."
                     Write-Output 'Use -UpdateSelfSource Main to track the branch it came from, or Install-Module UpdateEverything -Force to switch to the gallery copy.'
                 } elseif (-not $status.NeedsUpdate) {
                     Write-Output "UpdateEverything $($status.Installed) is the newest published release."
                 } else {
                     Write-Output "UpdateEverything $($status.Installed) -> $($status.Available)..."
                     try {
-                        Update-Module -Name 'UpdateEverything' -Force -Confirm:$false -ErrorAction Stop
+                        if ($status.Mover -eq 'Update-PSResource') {
+                            # -Scope defaults to CurrentUser by documented design,
+                            # so a per-user lineage moves without elevation.
+                            Update-PSResource -Name 'UpdateEverything' -TrustRepository -Confirm:$false -ErrorAction Stop
+                        } else {
+                            Update-Module -Name 'UpdateEverything' -Force -Confirm:$false -ErrorAction Stop
+                        }
                         Write-Output 'Updated. The new version loads on the next run; this one continues on the code already in memory.'
                     } catch {
-                        if ("$_" -match 'Administrator rights|elevated') {
-                            Write-Output 'UpdateEverything is installed for all users, so updating it needs Administrator rights. Run "Update-Module UpdateEverything -Force" from an elevated PowerShell.'
+                        if ("$_" -match 'Administrator rights|elevated|is denied') {
+                            $how = if ($status.Mover -eq 'Update-PSResource') {
+                                'Update-PSResource UpdateEverything -Scope AllUsers'
+                            } else {
+                                'Update-Module UpdateEverything -Force'
+                            }
+                            Write-Output "UpdateEverything is installed for all users, so updating it needs Administrator rights. Run `"$how`" from an elevated PowerShell."
                         } else {
                             throw
                         }
@@ -933,7 +944,7 @@
             }
 
             $what = if ($status.Receipted) {
-                "$name $($status.Installed) has a gallery receipt for an older version, so Update-Module would move that older copy rather than the one running. Installing $($status.Available) fresh is the way forward"
+                "$name $($status.Installed) has a gallery receipt for an older version, so the receipted update would move that older copy rather than the one running. Installing $($status.Available) fresh is the way forward"
             } elseif ($status.Installed) {
                 "$name $($status.Installed) is the copy this PowerShell shipped with, which cannot be updated in place. Installing $($status.Available) alongside it is the only way forward"
             } else {
