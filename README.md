@@ -26,9 +26,10 @@ Requires PowerShell 5.1 or later on Windows 10 or a matching Server release.
 
 ### Install from GitHub
 
-**The gallery carries minor versions only** -- 1.2.0, 1.3.0, 1.4.0. A patch
-release such as 1.2.1 is published here and nowhere else, so this is the
-supported way to get a fix that has landed but is not in a minor release yet.
+**The gallery carries minor versions, and the occasional patch that earns
+it.** Most patch releases, such as 1.2.1, are published here and nowhere
+else, so this is the supported way to get a fix that has landed but is not
+in a gallery release yet.
 
 `main` also carries whatever is being worked on. Nothing but the URL is
 needed:
@@ -281,13 +282,13 @@ read against the code that made it:
 
 ```
 Maintenance run started 09/01/2026 08:14  |  Admin: True  |  Main Log: ...
-UpdateEverything 1.7.0
+UpdateEverything 1.7.1
 ```
 
 The Inventory step then compares that against the gallery:
 
 ```
-UpdateEverything 1.7.0 is running, which is the newest published version.
+UpdateEverything 1.7.1 is running, which is the newest published version.
 ```
 
 The comparison lives there rather than in the banner because it costs a network
