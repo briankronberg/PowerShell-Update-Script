@@ -1381,11 +1381,21 @@ Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
     # decides between an update and a side-by-side install. Get-InstalledModule
     # is mocked rather than read, because whether this machine's Pester arrived
     # through Install-Module is not something a test should depend on.
-    It 'reports Updatable when PowerShellGet recorded the install' {
+    It 'reports Updatable when the receipt covers the newest installed copy' {
         Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
-        Mock Get-InstalledModule { [pscustomobject]@{ Name = 'Pester' } }
+        Mock Get-InstalledModule { [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion } }
 
         (Get-GalleryModuleStatus -Name Pester).Updatable | Should-BeTrue
+    }
+
+    # A receipt can name an older version than the newest copy on disk: a
+    # gallery install followed by a GitHub install leaves exactly that. The
+    # newest copy is then not the one Update-Module moves.
+    It 'does not call the newest copy updatable on an older receipt' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledModule { [pscustomobject]@{ Name = 'Pester'; Version = [version] '0.0.1' } }
+
+        (Get-GalleryModuleStatus -Name Pester).Updatable | Should-BeFalse
     }
 
     It 'reports a copy the host shipped as not updatable' {
