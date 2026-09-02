@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.5.1'
+    ModuleVersion     = '1.6.0'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -32,53 +32,59 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.5.1
+            ReleaseNotes = '# 1.6.0
 
-Fixes from a review of the whole 1.4.0-1.5.0 feature stack. GitHub-only: the
-gallery carries minor versions, and these land there with 1.6.0.
+Both gallery clients are read, two new steps arrive under two new tags, and
+the fixes that shipped on GitHub as 1.5.1.
 
-## Self-update
+## The self-update reads both gallery clients
 
--UpdateSelf skipped elevation on the premise that a self-update never needs
-it. For an all-users install that premise failed the update on Windows
-PowerShell and let newer PowerShellGet side-install a per-user copy instead.
-The step still raises no UAC prompt; an all-users copy is now reported as
-needing an elevated session.
+PSResourceGet ships in the box with PowerShell 7.4 and its receipts are
+invisible to Get-InstalledModule, so a copy installed with Install-PSResource
+was told it did not come from the gallery, and -UpdateSelf ran Update-Module,
+which cannot move it. The status now consults both clients and runs the one
+whose receipt covers the installed copy -- Update-PSResource, whose
+CurrentUser default keeps the no-elevation promise, or Update-Module as
+before. An all-users copy is reported as needing an elevated session, with
+the command that matches, and no UAC prompt is raised either way.
 
--Tag Self selected nothing, because the self step was gated on the switch
-alone. The tag now selects the step too, so a scheduled task built with
--Tag Self performs the self-update it names.
+-Tag Self now selects the self step; in 1.5.0 the tag alone ran nothing. A
+machine holding a receipted older version beside a newer copy without a
+receipt is told about the mixed lineage and the way out, rather than being
+called a copy that shipped with the host.
 
-A machine holding a receipted older version beside a newer copy without a
-receipt is no longer told the newer copy shipped with this host. The self and
-gallery-tooling steps name the mixed lineage and the command that resolves
-it, and a receipt carrying a prerelease or build suffix no longer throws
-during the check.
+## Two new steps
 
-A copy running from outside every module path is pointed at Install-Module,
-which -UpdateSelf could not have reached.
+VS Code extensions runs "code --update-extensions" under the new Editor tag.
+The editor itself moves through winget; its extensions only auto-update
+while the editor is open to see them, so the step earns its keep on the
+editor that is rarely opened or has auto-update off.
 
-## Steps and reporting
+MiKTeX packages updates installed TeX packages under the new TeX tag,
+through the modern miktex CLI. MiKTeX warns when per-user and all-users
+updates mix, so the step runs exactly one mode, chosen by where the
+executable lives. An all-users install updates only from an elevated
+session, and is skipped with that reason otherwise.
 
-Duplicate-tool detection compares directories case-insensitively again, so a
-PATH that lists the same directory twice in different casing counts as one
-install rather than drawing a warning.
+The inventory covers 26 tools.
 
-The Python launcher probe runs from the system directory inside a try/catch.
-A file named help in the working directory can no longer be executed by the
-probe, and a launcher that fails to start no longer inherits the previous
-command exit code.
+## The 1.5.1 fixes, new to the gallery
 
-conda moved under the Python banner and gained the same ownership check as
-uv and pipx: a copy that another package manager installed is left to that
-manager.
+Duplicate-tool detection compares directories case-insensitively again. The
+Python launcher probe runs from the system directory inside a try/catch, so
+a file named help in the working directory can no longer be executed by it.
+conda sits under the Python banner with the same ownership check as uv and
+pipx. A step whose tool is absent reports the absent tool rather than a need
+for Administrator when both are true, and skipped steps record their log
+path. The task wizard reads its tag list from the command it drives. A copy
+running from outside every module path is pointed at Install-Module.
 
-A step whose tool is absent reports the absent tool rather than a need for
-Administrator when both are true, and skipped steps record the path of the
-log they wrote.
+## Also in the repository
 
-The task wizard reads its tag list from the cmdlet it drives, so the Go and
-Cloud tags introduced in 1.4.0 are offered instead of missing.
+Convert-PowerShell7ToMsi.ps1 moves a machine from the Store (MSIX)
+PowerShell 7 -- which cannot run elevated, and breaks anything that recorded
+its versioned path whenever it updates -- to the MSI install, in one
+attended run from Windows PowerShell. The README shows the command.
 '
 
         }
