@@ -290,6 +290,16 @@ Describe 'Get-UpdateTaskArgument' -Tag 'Unit' {
         Get-UpdateTaskArgument -ModuleRoot 'C:\x' -ExtraArgument '-IncludeWindowsUpdate', '$false' |
             Should-MatchString ([regex]::Escape('-IncludeWindowsUpdate $false'))
     }
+
+    It 'quotes each tag so the child parses them as a list' {
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -Tag 'Node', 'Cloud' |
+            Should-MatchString ([regex]::Escape("-Tag 'Node','Cloud'"))
+    }
+
+    It 'quotes exclusions the same way' {
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -ExcludeTag 'Cloud' |
+            Should-MatchString ([regex]::Escape("-ExcludeTag 'Cloud'"))
+    }
 }
 
 Describe 'Get-CadenceDescription' -Tag 'Unit' {
@@ -348,6 +358,91 @@ Describe 'Registration safety' -Tag 'Static' {
             Where-Object { $_ -match 'Write-Host' -and $_.Contains('.\') -and $_ -match '\.ps1' }
 
         $offenders | Should-BeNull -Because "these are refused under AllSigned:`n$($offenders -join "`n")"
+    }
+}
+
+Describe 'Registration refusals' -Tag 'Unit' {
+
+    # Both guards throw before anything is created, so a refused registration
+    # leaves no task behind.
+
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Register-ScheduledTask { }
+        Mock Get-ScheduledTask { }
+    }
+
+    It 'refuses a session without elevation' {
+        Mock Test-IsAdministrator { $false }
+
+        { Register-UpdateEverythingTask } | Should-Throw -ExceptionMessage '*elevated session*'
+        Should-NotInvoke Register-ScheduledTask
+    }
+
+    It 'refuses to replace an existing task without -Force' {
+        Mock Test-IsAdministrator { $true }
+        Mock Get-ScheduledTask { [pscustomobject]@{ TaskName = 'Update-Everything' } }
+
+        { Register-UpdateEverythingTask } | Should-Throw -ExceptionMessage '*already exists*'
+        Should-NotInvoke Register-ScheduledTask
+    }
+
+    # A scheduled run cannot prompt for consent to install BurntToast, so a
+    # task registered with -Notify and no way to notify deserves a warning now,
+    # not silence at three in the morning.
+    It 'warns when the task will notify nobody' {
+        Mock Test-IsAdministrator { $true }
+        Mock Test-NotificationModuleAvailable { $false }
+        Mock Register-ScheduledTask { [pscustomobject]@{ TaskName = $TaskName } }
+
+        $everything = @(Register-UpdateEverythingTask 3>&1)
+
+        "$($everything -join ' ')" | Should-MatchString 'notify nobody'
+    }
+}
+
+Describe 'Unregister-UpdateEverythingTask' -Tag 'Unit' {
+
+    BeforeEach {
+        Mock Write-Host { }
+        Mock Unregister-ScheduledTask { }
+    }
+
+    It 'removes the task when it exists' {
+        Mock Get-ScheduledTask { [pscustomobject]@{ TaskName = 'Update-Everything' } }
+
+        Unregister-UpdateEverythingTask -Confirm:$false
+
+        Should-Invoke Unregister-ScheduledTask -Times 1 -Exactly -ParameterFilter {
+            $TaskName -eq 'Update-Everything'
+        }
+    }
+
+    It 'does nothing, quietly, when there is no task' {
+        Mock Get-ScheduledTask { }
+
+        Unregister-UpdateEverythingTask -Confirm:$false
+
+        Should-NotInvoke Unregister-ScheduledTask
+    }
+
+    It 'carries a custom name and folder through' {
+        Mock Get-ScheduledTask { [pscustomobject]@{ TaskName = 'Nightly' } }
+
+        Unregister-UpdateEverythingTask -TaskName 'Nightly' -TaskPath '\WWT\' -Confirm:$false
+
+        Should-Invoke Unregister-ScheduledTask -Times 1 -Exactly -ParameterFilter {
+            $TaskName -eq 'Nightly' -and $TaskPath -eq '\WWT\'
+        }
+    }
+
+    # Removing a schedule is the operation -WhatIf exists for.
+    It 'honours -WhatIf' {
+        Mock Get-ScheduledTask { [pscustomobject]@{ TaskName = 'Update-Everything' } }
+
+        Unregister-UpdateEverythingTask -WhatIf
+
+        Should-NotInvoke Unregister-ScheduledTask
     }
 }
 
@@ -634,6 +729,20 @@ Describe 'Adding a second task' -Tag 'Unit' {
         New-TaskFromPrompt -DefaultName 'Update-Everything' -Replace
 
         Should-Invoke Register-UpdateEverythingTask -ParameterFilter { $Force }
+    }
+
+    # Register throws on a session without elevation. Mid-wizard that becomes a
+    # warning naming the cause, not a stack trace out of the menu.
+    It 'turns a failed registration into a warning' {
+        $script:answers = @('', '', '', '')
+        $script:next = 0
+        Mock Read-Host { $script:answers[$script:next++] }
+        Mock Register-UpdateEverythingTask { throw 'requires an elevated session' }
+
+        $warnings = @(New-TaskFromPrompt 3>&1)
+
+        "$($warnings -join ' ')" | Should-MatchString 'Could not register the task'
+        "$($warnings -join ' ')" | Should-MatchString 'elevated session'
     }
 }
 
