@@ -19,7 +19,9 @@ function Get-GalleryModuleStatus {
         Updatable reports whether Update-Module can move this copy forward. It
         refuses anything it did not install, answering "Module 'X' was not
         installed by using Install-Module, so it cannot be updated" -- which
-        covers every module that shipped with the host. Windows PowerShell
+        covers every module that shipped with the host, and any copy whose
+        receipt names an older version than the newest one installed, since
+        Update-Module moves only the receipted lineage. Windows PowerShell
         ships PowerShellGet 1.0.0.1
         under Program Files rather than $PSHOME, so the path is not the test;
         whether PowerShellGet recorded the install is. Moving a shipped copy
@@ -48,10 +50,17 @@ function Get-GalleryModuleStatus {
 
     # Ask PowerShellGet what it installed, rather than inferring it from the
     # path. Get-InstalledModule reports only what came through Install-Module,
-    # which is exactly the set Update-Module will act on.
+    # which is exactly the set Update-Module will act on -- and the receipt has
+    # to cover the newest installed copy, the one Installed names. A machine can
+    # carry a receipted older version beside a GitHub-installed newer one, and
+    # Update-Module moves only the receipted lineage.
     $updatable = $false
     if ($present.Count -and (Get-Command Get-InstalledModule -ErrorAction SilentlyContinue)) {
-        $updatable = [bool] (Get-InstalledModule -Name $Name -ErrorAction SilentlyContinue)
+        $receipt = Get-InstalledModule -Name $Name -ErrorAction SilentlyContinue
+        if ($receipt) {
+            $raw = "$($receipt.Version)" -replace '-.*$', ''
+            $updatable = [bool] ($raw -and ([version] $raw -eq $installed))
+        }
     }
 
     # SilentlyContinue and a check, not Stop and a catch. A module the gallery
