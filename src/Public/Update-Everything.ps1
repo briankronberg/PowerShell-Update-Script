@@ -517,9 +517,19 @@
                     Write-Output "UpdateEverything $($status.Installed) -> $($status.Available)..."
                     try {
                         if ($status.Mover -eq 'Update-PSResource') {
-                            # -Scope defaults to CurrentUser by documented design,
-                            # so a per-user lineage moves without elevation.
-                            Update-PSResource -Name 'UpdateEverything' -TrustRepository -Confirm:$false -ErrorAction Stop
+                            if ($status.MoverScope -eq 'AllUsers' -and -not $script:isAdmin) {
+                                # Checked up front rather than caught, because
+                                # Update-PSResource would not refuse: its
+                                # CurrentUser default would quietly install the
+                                # new version per-user beside the all-users copy.
+                                Write-Output 'UpdateEverything is installed for all users, so updating it needs Administrator rights. Run "Update-PSResource UpdateEverything -Scope AllUsers" from an elevated PowerShell.'
+                                return
+                            }
+                            # A per-user lineage moves without elevation: -Scope
+                            # defaults to CurrentUser by documented design.
+                            $moveArgs = @{ Name = 'UpdateEverything'; TrustRepository = $true; Confirm = $false; ErrorAction = 'Stop' }
+                            if ($status.MoverScope -eq 'AllUsers') { $moveArgs.Scope = 'AllUsers' }
+                            Update-PSResource @moveArgs
                         } else {
                             Update-Module -Name 'UpdateEverything' -Force -Confirm:$false -ErrorAction Stop
                         }

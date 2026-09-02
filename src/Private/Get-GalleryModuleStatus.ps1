@@ -5,8 +5,10 @@ function Get-GalleryModuleStatus {
         the PowerShell Gallery.
 
         .DESCRIPTION
-        Returns Name, Installed, Available, Receipted, Updatable, Mover and
-        NeedsUpdate.
+        Returns Name, Installed, Available, Receipted, Updatable, Mover,
+        MoverScope and NeedsUpdate. MoverScope is the installation scope of the
+        covering receipt -- CurrentUser or AllUsers -- because Update-PSResource
+        must be told when the copy to move is the machine-wide one.
 
         Installed is $null when the module is absent. Absent means any install
         is a new install and needs consent; present but old means an update,
@@ -69,6 +71,7 @@ function Get-GalleryModuleStatus {
     $receipted = $false
     $updatable = $false
     $mover = $null
+    $moverScope = $null
     if ($present.Count) {
         foreach ($client in @(
                 @{ Reader = 'Get-InstalledPSResource'; Mover = 'Update-PSResource' }
@@ -76,19 +79,33 @@ function Get-GalleryModuleStatus {
             )) {
             if (-not (Get-Command $client.Reader -ErrorAction SilentlyContinue)) { continue }
 
-            # PSResourceGet lists every installed version, not just the newest.
+            # PSResourceGet lists every installed version, not just the newest
+            # -- and its bare call reads only the per-user paths, so the
+            # machine scope is asked separately or an AllUsers install reports
+            # no receipt at all. Get-InstalledModule takes no -Scope and reads
+            # every path in one call.
             $receipts = @(& $client.Reader -Name $Name -ErrorAction SilentlyContinue)
+            if ($client.Reader -eq 'Get-InstalledPSResource') {
+                $receipts += @(& $client.Reader -Name $Name -Scope AllUsers -ErrorAction SilentlyContinue)
+            }
             if (-not $receipts.Count) { continue }
             $receipted = $true
 
             foreach ($receipt in $receipts) {
                 $raw = "$($receipt.Version)" -replace '-.*$', ''
                 $parsed = $null
-                if ($raw -and [version]::TryParse($raw, [ref] $parsed) -and $parsed -eq $installed) {
-                    $updatable = $true
-                    $mover = $client.Mover
-                    break
-                }
+                if (-not ($raw -and [version]::TryParse($raw, [ref] $parsed) -and $parsed -eq $installed)) { continue }
+
+                $updatable = $true
+                $mover = $client.Mover
+
+                # The covering receipt says which scope the update must target.
+                # A per-user receipt wins when both scopes cover: that copy
+                # shadows the machine one in PSModulePath order, and moving it
+                # needs no elevation.
+                $scope = if ("$($receipt.InstalledLocation)" -like (Join-Path $env:ProgramFiles '*')) { 'AllUsers' } else { 'CurrentUser' }
+                if (-not $moverScope -or $scope -eq 'CurrentUser') { $moverScope = $scope }
+                if ($moverScope -eq 'CurrentUser') { break }
             }
             if ($mover) { break }
         }
@@ -132,6 +149,7 @@ function Get-GalleryModuleStatus {
         Receipted   = $receipted
         Updatable   = $updatable
         Mover       = $mover
+        MoverScope  = $moverScope
         NeedsUpdate = [bool] ($installed -and $available -and $available -gt $installed)
     }
 }
