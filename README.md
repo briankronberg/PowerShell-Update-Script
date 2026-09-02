@@ -268,7 +268,7 @@ thing that crosses a process boundary.
 more of:
 
 `Windows` `Microsoft` `PowerShell` `PackageManager` `Python` `Node` `DotNet`
-`Rust` `Go` `Cloud` `Git` `Self` `Inventory`
+`Rust` `Go` `Cloud` `Git` `Editor` `TeX` `Self` `Inventory`
 
 ```powershell
 Update-Everything -Tag Python
@@ -299,7 +299,7 @@ called out of date.
 quickest way to see why a run skipped what it skipped:
 
 ```
-12 of 24 tools present.
+12 of 26 tools present.
 
   winget           Unknown     v1.29.290
   PowerShell 7     Unknown     PowerShell 7.6.5
@@ -420,6 +420,8 @@ choose the packages; the manager's own inventory does.
 | Azure CLI | `az` | `az upgrade --yes --only-show-errors` | The CLI and its installed extensions. Reruns the MSI, so it needs administrator rights. Tagged `Cloud`: `-ExcludeTag Cloud` drops it on a metered or offline machine. |
 | Google Cloud CLI | `gcloud`, plus an ownership check | `gcloud components update --quiet` | Every installed component of the bundled install. A Chocolatey or Scoop gcloud disables its own component manager and is left to that manager. Tagged `Cloud`. |
 | GitHub CLI | `gh`, plus a non-empty `gh extension list` | `gh extension upgrade --all` | Installed `gh` extensions. That second check matters, because the upgrade command exits non-zero when nothing is installed. |
+| VS Code extensions | `code` | `code --update-extensions` | Installed VS Code extensions. The editor itself moves through winget, and an extension only auto-updates while the editor is open to see it -- so this covers the editor that is rarely opened, or has auto-update off. Tagged `Editor`. |
+| MiKTeX | `miktex` | `miktex packages update-package-database`, then `miktex packages update` | Installed TeX packages, in the mode matching the install: an all-users MiKTeX runs with `--admin` and needs an elevated session, a per-user one does not. The step runs exactly one mode, because MiKTeX warns when the two mix. Tagged `TeX`. |
 
 ### How it decides who owns a tool
 

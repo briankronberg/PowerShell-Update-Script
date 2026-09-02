@@ -65,6 +65,8 @@ function Get-UpdateToolInventory {
             @{ Name = 'GitHub CLI';      Command = 'gh';      VersionArgument = '--version' }
             @{ Name = 'Azure CLI';       Command = 'az';      VersionArgument = $null }
             @{ Name = 'Google Cloud CLI'; Command = 'gcloud'; VersionArgument = $null }
+            @{ Name = 'VS Code';         Command = 'code';    VersionArgument = $null }
+            @{ Name = 'MiKTeX';          Command = 'miktex';  VersionArgument = '--version' }
             @{ Name = 'WSL';             Command = 'wsl';     VersionArgument = $null }
         )
     }
@@ -94,10 +96,11 @@ function Get-UpdateToolInventory {
             continue
         }
 
-        # Scoop and WSL are left without a version argument on purpose. scoop is
-        # a PowerShell shim whose --version runs a git describe against its own
-        # repository, and wsl --version writes UTF-16 that arrives as spaced-out
-        # characters. Neither is worth the seconds or the mess.
+        # The null version arguments are on purpose. scoop is a PowerShell shim
+        # whose --version runs a git describe against its own repository; wsl
+        # --version writes UTF-16 that arrives as spaced-out characters; az,
+        # gcloud and code each take seconds to answer. Presence is most of the
+        # value, and none of these are worth the wait or the mess.
         $version = $null
         if ($tool.VersionArgument) {
             try {

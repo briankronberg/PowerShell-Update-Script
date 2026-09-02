@@ -245,9 +245,9 @@
         [switch] $Notify,
         [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Cloud', 'Git', 'Self', 'Inventory')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Cloud', 'Git', 'Editor', 'TeX', 'Self', 'Inventory')]
         [string[]] $Tag = @(),
-        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Cloud', 'Git', 'Self', 'Inventory')]
+        [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Cloud', 'Git', 'Editor', 'TeX', 'Self', 'Inventory')]
         [string[]] $ExcludeTag = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30,
@@ -1404,6 +1404,14 @@
         gh extension upgrade --all
     }
 
+    Invoke-Step -Name 'VS Code extensions' -RequiresCommand 'code' -Tag 'Editor' -Action {
+        # The editor itself is winget's to move; this covers its extensions.
+        # extensions.autoUpdate defaults to true, but an extension only updates
+        # while the editor is open to see it -- so this step earns its keep on
+        # the editor that is rarely opened, or has auto-update turned off.
+        code --update-extensions
+    }
+
     # ---------------------------------------------------------------------------
     # 7b. Cloud CLIs
     # ---------------------------------------------------------------------------
@@ -1441,6 +1449,37 @@
                 Write-Error "gcloud components update failed with exit code $LASTEXITCODE. gcloud's own message is in this step's log."
                 $global:LASTEXITCODE = 0
             }
+        }
+    }
+
+    # ---------------------------------------------------------------------------
+    # 7c. TeX
+    # ---------------------------------------------------------------------------
+    Invoke-Step -Name 'MiKTeX packages' -RequiresCommand 'miktex' -Tag 'TeX' -Action {
+        # MiKTeX runs per-user or for all users ("admin mode"), and mixing the
+        # two draws its own warning -- so the step runs exactly one mode, chosen
+        # by where the executable lives. An all-users install updates only from
+        # an elevated session.
+        $source = @(Get-Command miktex -CommandType Application -ErrorAction SilentlyContinue)[0].Source
+        $adminArgs = @()
+        if ($source -like (Join-Path $env:ProgramFiles '*')) {
+            if (-not $script:isAdmin) {
+                Stop-StepAsSkipped -Reason 'MiKTeX is installed for all users and needs an elevated session'
+            }
+            $adminArgs = @('--admin')
+        }
+
+        miktex @adminArgs packages update-package-database
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "miktex packages update-package-database failed with exit code $LASTEXITCODE. MiKTeX's own message is in this step's log."
+            $global:LASTEXITCODE = 0
+            return
+        }
+
+        miktex @adminArgs packages update
+        if ($LASTEXITCODE -ne 0) {
+            Write-Error "miktex packages update failed with exit code $LASTEXITCODE. MiKTeX's own message is in this step's log."
+            $global:LASTEXITCODE = 0
         }
     }
 
