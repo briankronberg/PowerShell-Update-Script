@@ -2083,6 +2083,40 @@ Describe 'Updating the module itself' -Tag 'Static' {
     }
 }
 
+Describe 'The MiKTeX step' -Tag 'Static' {
+
+    BeforeAll {
+        $script:MikSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+        $script:MikStep = [regex]::Match($script:MikSource,
+            "(?s)Invoke-Step -Name 'MiKTeX packages'.*?\n    \}").Value
+    }
+
+    It 'exists and is tagged TeX' {
+        $script:MikStep | Should-MatchString "-Tag 'TeX'"
+    }
+
+    # MiKTeX warns when admin-mode and user-mode updates mix, so the step must
+    # pick exactly one mode from where the executable lives.
+    It 'runs admin mode only for an all-users install' {
+        $script:MikStep | Should-MatchString ([regex]::Escape('$env:ProgramFiles'))
+        $script:MikStep | Should-MatchString ([regex]::Escape("adminArgs = @('--admin')"))
+    }
+
+    It 'skips an all-users install in an unelevated session, rather than failing' {
+        $script:MikStep | Should-MatchString 'Stop-StepAsSkipped'
+        $script:MikStep | Should-MatchString 'needs an elevated session'
+    }
+
+    It 'updates the package database before the packages' {
+        $databaseAt = $script:MikStep.IndexOf('update-package-database')
+        $packagesAt = $script:MikStep.LastIndexOf('packages update')
+
+        $databaseAt | Should-BeGreaterThan -1
+        $packagesAt | Should-BeGreaterThan $databaseAt
+    }
+}
+
 Describe 'Get-DeveloperToolCatalogue' -Tag 'Unit' {
 
     BeforeAll { $script:Catalogue = @(Get-DeveloperToolCatalogue) }
