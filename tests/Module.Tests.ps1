@@ -63,6 +63,7 @@ BeforeDiscovery {
     $LintTargets += (Join-Path $ModuleRoot 'UpdateEverything.psm1')
     $LintTargets += (Join-Path $RepoRoot 'test.ps1')
     $LintTargets += (Join-Path $RepoRoot 'Install.ps1')
+    $LintTargets += (Join-Path $RepoRoot 'Convert-PowerShell7ToMsi.ps1')
 
     # Everything under tests\: the test files, and the fresh-machine and
     # elevation harnesses. Pester runs *.Tests.ps1 and nothing runs the
@@ -811,6 +812,59 @@ Describe 'Nothing shows a parameter the command does not have' -Tag 'Docs' {
     # "how do I just run it", had no answer on screen.
     It 'tells a new user how to run everything' {
         ($printed -join "`n") | Should-MatchString '(?m)^\s*Update-Everything\s*$'
+    }
+}
+
+Describe 'The Store-to-MSI mover' -Tag 'Static' {
+
+    BeforeAll {
+        $script:MoverSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'Convert-PowerShell7ToMsi.ps1') -Raw
+    }
+
+    # The Store package cannot remove the process it is hosting, and a packaged
+    # pwsh cannot elevate.
+    It 'refuses to run from a packaged host' {
+        $script:MoverSource | Should-MatchString 'Test-PackagedHost'
+        $script:MoverSource | Should-MatchString ([regex]::Escape("PSEdition -ne 'Desktop'"))
+    }
+
+    # winget's Microsoft.PowerShell has installed the MSIX package by default
+    # since 7.6. Installing through it would hand back the thing being removed.
+    It 'installs from the PowerShell release, never through winget' {
+        $script:MoverSource | Should-MatchString 'repos/PowerShell/PowerShell/releases'
+        $script:MoverSource | Should-NotMatchString 'winget install'
+    }
+
+    It 'verifies the MSI answers before the package is removed' {
+        $verified = $script:MoverSource.IndexOf('did not answer; the Store package stays')
+        $removed  = $script:MoverSource.IndexOf('Remove-AppxPackage')
+
+        $verified | Should-BeGreaterThan -1
+        $removed  | Should-BeGreaterThan $verified
+    }
+
+    # 5.1 does not offer TLS 1.2 to every endpoint by default, and the GitHub
+    # API requires it.
+    It 'speaks TLS 1.2 before asking the release API' {
+        $script:MoverSource | Should-MatchString 'Tls12'
+    }
+
+    It 'backs settings.json up before pointing the default at the MSI profile' {
+        $backupAt = $script:MoverSource.IndexOf('Copy-Item -LiteralPath $settingsPath')
+        $writeAt  = $script:MoverSource.IndexOf('WriteAllText($settingsPath')
+
+        $backupAt | Should-BeGreaterThan -1
+        $writeAt  | Should-BeGreaterThan $backupAt
+    }
+
+    It 'reports scheduled tasks rather than editing them' {
+        $script:MoverSource | Should-NotMatchString 'Set-ScheduledTask'
+        $script:MoverSource | Should-NotMatchString 'Register-ScheduledTask'
+    }
+
+    It 'is documented in the README' {
+        $script:Readme | Should-MatchString 'Convert-PowerShell7ToMsi'
     }
 }
 
