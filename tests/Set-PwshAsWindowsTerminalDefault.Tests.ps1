@@ -60,6 +60,28 @@ Describe 'Set-PwshAsWindowsTerminalDefault' -Tag 'Unit' {
             $result.defaultProfile | Should-Be $script:PwshGuid
         }
 
+        # Terminal rewrites settings.json from memory when it exits, so an edit
+        # made while it is open can silently revert. The person gets told.
+        It 'warns when Windows Terminal is running' {
+            Mock Get-Process { [pscustomobject]@{ Name = 'WindowsTerminal' } }
+
+            $everything = @(Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 3>&1 6>$null)
+
+            "$($everything -join ' ')" | Should-MatchString 'may revert this change'
+        }
+
+        It 'names the likely lock holder when the file cannot be written' {
+            # Read sharing only: the function can read and back the file up, and
+            # the write is what fails -- the same shape as Terminal holding it.
+            $handle = [System.IO.File]::Open($script:SettingsPath, 'Open', 'Read', 'Read')
+            try {
+                { $null = Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 3>$null 6>$null } |
+                    Should-Throw -ExceptionMessage '*Could not write settings.json*'
+            } finally {
+                $handle.Dispose()
+            }
+        }
+
         It 'leaves every other setting alone' {
             Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 6>$null
 
@@ -149,6 +171,34 @@ Describe 'Set-PwshAsWindowsTerminalDefault' -Tag 'Unit' {
         }
     }
 
+    Context 'A settings file that only the regex can read' {
+
+        BeforeEach {
+            # A missing comma between members: not JSON, and not rescued by the
+            # comment stripper. The regex fallback still finds and moves the
+            # default, and the parse failure is said out loud.
+            $content = '{' + [Environment]::NewLine +
+                '    "defaultProfile": "{11111111-1111-1111-1111-111111111111}"' + [Environment]::NewLine +
+                '    "theme": "dark"' + [Environment]::NewLine +
+                '}'
+            Set-Content -LiteralPath $script:SettingsPath -Value $content -Encoding utf8
+        }
+
+        It 'says the file did not parse, out loud' {
+            $everything = @(Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 3>&1 6>$null)
+
+            "$($everything -join ' ')" | Should-MatchString 'did not parse even after stripping comments'
+        }
+
+        It 'still moves the default, through the raw text' {
+            $null = Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 3>$null 6>$null
+
+            $raw = Get-Content -LiteralPath $script:SettingsPath -Raw
+            $raw | Should-MatchString ('"defaultProfile"\s*:\s*"' + [regex]::Escape($script:PwshGuid) + '"')
+            $raw | Should-NotMatchString '11111111'
+        }
+    }
+
     Context 'A settings file with no defaultProfile key' {
 
         BeforeEach {
@@ -201,6 +251,21 @@ Describe 'Set-PwshAsWindowsTerminalDefault' -Tag 'Unit' {
     }
 
     Context 'Refusing to damage a file it cannot understand' {
+
+        # Terminal takes the last of two defaultProfile keys, so an edit that
+        # left two would look applied while doing nothing predictable. The
+        # count guard refuses, and the file is not touched.
+        It 'refuses a file that already carries two defaultProfile keys' {
+            $content = '{ "defaultProfile": "{11111111-1111-1111-1111-111111111111}", ' +
+                '"defaultProfile": "{22222222-2222-2222-2222-222222222222}", ' +
+                '"profiles": { "list": [] } }'
+            Set-Content -LiteralPath $script:SettingsPath -Value $content -Encoding utf8
+            $before = Get-Content -LiteralPath $script:SettingsPath -Raw
+
+            { $null = Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 3>$null 6>$null } |
+                Should-Throw -ExceptionMessage '*expected exactly 1*'
+            Get-Content -LiteralPath $script:SettingsPath -Raw | Should-Be $before
+        }
 
         It 'throws rather than rewriting an empty settings.json' {
             Set-Content -LiteralPath $script:SettingsPath -Value '' -Encoding utf8
