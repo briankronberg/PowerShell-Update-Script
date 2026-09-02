@@ -325,8 +325,12 @@ uses colour to separate failures from noise.
 because they all ran under 7 where a separate code path masked it.
 
 Because of this, the suite shells out to both `powershell.exe` and `pwsh.exe`
-and imports the module in each. If you change the loader, the manifest, or
-anything touching encoding, run the suite on both editions before opening a PR.
+and imports the module in each, and CI runs a second job that takes the
+read-only inventory pass end to end under 5.1
+(`tests/WindowsPowerShell/Invoke-WindowsPowerShellSmoke.ps1`, runnable locally
+with `powershell -File`). If you change the loader, the manifest, or anything
+touching encoding, run that smoke test as well as the suite before opening a
+PR -- the suite itself cannot run under 5.1, because Pester 6 requires 7.
 
 ## ErrorAction
 
