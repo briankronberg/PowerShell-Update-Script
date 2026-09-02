@@ -559,3 +559,7 @@ git tag -a v1.4.0 -m "1.4.0" && git push origin v1.4.0
 
 Then cut a GitHub release at that tag, reusing the manifest's `ReleaseNotes` so
 one text serves the manifest, the gallery page and the release.
+
+Once the gallery lists the new version, run the
+[gallery validation](tests/Gallery/README.md). It downloads the published
+artifact and runs it, which nothing before the publish can do.
