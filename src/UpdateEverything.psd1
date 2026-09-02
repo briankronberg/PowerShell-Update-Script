@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.4.1'
+    ModuleVersion     = '1.5.0'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -32,10 +32,10 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.4.1
+            ReleaseNotes = '# 1.5.0
 
-One fix. GitHub-only: the gallery carries minor versions, and this lands
-there with 1.5.0.
+One fix, for machines that installed from the gallery once and from GitHub
+later.
 
 ## Updatable means the receipt covers the newest installed copy
 
@@ -51,8 +51,13 @@ newest installed copy. On a mixed machine the self step takes the guidance
 branch instead, naming Install-Module -Force and -UpdateSelfSource Main,
 both of which do what they say there.
 
-Found by the new gallery-validation harness (tests/Gallery) on its first
-run, on a machine in exactly that mixed state.
+## Verified before publishing
+
+Found and fixed through a new release harness that downloads the published
+package from the gallery and runs it as installed, on a machine in exactly
+the mixed state above. The self-elevation handoff was re-verified end to end
+on a real machine with UAC on -- eight checks, none skipped -- before this
+version shipped.
 '
 
         }
