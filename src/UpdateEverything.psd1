@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.7.3'
+    ModuleVersion     = '1.8.0'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -33,30 +33,48 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.7.3
+            ReleaseNotes = '# 1.8.0
 
-Fixes from a full run of 1.7.2 on a live machine.
+Three additions from comparing this module with a smaller daily-update
+script, and one fix since 1.7.3.
 
-## The Terminal default stays where you put it
+## Notifications are on by default
 
-Windows Terminal generates one PowerShell 7 profile per pwsh install it has
-seen, so a machine that moved from the Store package to the MSI has two. The
-Terminal-default step compared against the first one only and moved a
-default that already named the second, on every run. It now recognises any
-pwsh profile -- generated or hand-written, by GUID or by name -- and leaves
-a default that points at one alone.
+A run now raises its toasts without being asked. -Notify:$false turns them
+off. -Notify stays a switch, so every task registered by an earlier version
+keeps working unchanged; what changed is that not passing it means on. When
+BurntToast is not installed and -Notify was not passed, the closing summary
+says so in one line and offers nothing for install, so the default cannot
+nag. A run that passed -Notify keeps the warning and the consent prompt.
 
-## The inventory reports every version it can
+## -Attended holds the window
 
-The Python install manager prints its version at the head of help and
-nothing for --version, so help is what gets asked. wsl.exe writes UTF-16,
-which used to arrive unreadable; it is now read as what it is, so WSL shows
-its version too.
+A run started from a shortcut or a Start-menu pin closes its window before
+the summary can be read. -Attended holds it until a key is pressed, and
+closes on its own after -PromptTimeoutSeconds when given, otherwise ten
+minutes. The default stays unattended; a task carrying -Attended in
+-ExtraArgument is warned at registration.
 
-## Windows Update says what it found
+## PATH is refreshed between steps
 
-When the scan offers nothing, the step says so, and names whether Microsoft
-Update was part of the scan, instead of finishing in silence.
+A step that installs a manager changes the machine or user PATH, and the
+process used to keep the PATH it started with, so the new tool was found by
+the next run. The run now re-reads both hives after each step and says
+"PATH gained: ..." when there is anything to say. Entries this session added
+itself stay in front.
+
+## A run that did not finish is reported
+
+A run stopped by the task execution time limit, or by a closed window, left
+a transcript that simply stopped. The next run reads it and warns at the
+top, naming when it started, its last step and the file. Registering a task
+prints the time limit alongside the schedule.
+
+## Fixes
+
+The Inventory row for WSL read as garbage inside a run: wsl.exe writes
+UTF-16 from a bare shell and single-byte text inside a run. The probe now
+sets WSL_UTF8=1 for the one call, which makes it write UTF-8 in both.
 '
 
         }
