@@ -402,6 +402,22 @@ Describe 'Registration refusals' -Tag 'Unit' {
         "$($everything -join ' ')" | Should-MatchString 'notify nobody'
     }
 
+    # The limit is the one setting that ends a run by force, and the person
+    # registering the task is the one who can change it.
+    It 'prints the execution time limit alongside the schedule' {
+        Mock Test-IsAdministrator { $true }
+        Mock Test-NotificationModuleAvailable { $true }
+        Mock Register-ScheduledTask { [pscustomobject]@{ TaskName = $TaskName } }
+
+        # Write-Host is mocked away for this Describe, so capture what it was given.
+        $script:Printed = [System.Collections.Generic.List[string]]::new()
+        Mock Write-Host { $script:Printed.Add("$Object") }
+
+        $null = Register-UpdateEverythingTask -ExecutionTimeLimitHours 3
+
+        ($script:Printed -join ' ') | Should-MatchString 'Limit\s*:\s*3 hour'
+    }
+
     # A task has nobody at the window, so -Attended in -ExtraArgument would hold
     # every run open until the hold timed out.
     It 'warns when the task would hold the window for nobody' {

@@ -460,6 +460,12 @@
         Write-Host "UpdateEverything $script:RunningVersion" -ForegroundColor Green
     }
 
+    # A run the task's time limit stopped, or a window closed early, left a
+    # transcript that simply stops. Said here, at the top of the next run, since
+    # nothing else records it.
+    $unfinished = Get-UnfinishedRunNote -LogDirectory $logDir -CurrentLog $mainLog
+    if ($unfinished) { Write-Warning $unfinished }
+
     # ---------------------------------------------------------------------------
     # 1a. What this machine actually has
     # ---------------------------------------------------------------------------

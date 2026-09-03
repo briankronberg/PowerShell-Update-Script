@@ -563,6 +563,22 @@ The module writes logs to the first writable location among `%USERPROFILE%`,
 Many CLIs write ordinary progress to stderr, so a step earns `Warning` only when
 PowerShell itself raises an error record.
 
+### A run that did not finish
+
+A run stopped by the task's execution time limit, or by a window closed early,
+dies mid-step: its transcript has a start line and no summary. The next run
+reads the newest previous transcript and, when it ends that way, says so at the
+top:
+
+```
+WARNING: The previous run, started 09/02/2026 03:00:12, did not finish; its last
+step was 'Windows Update'. A run stopped at the task's time limit, or by a closed
+window, ends this way. See C:\Users\you\UpdateLogs\Update-Everything-20260902-030012.log
+```
+
+Registering a task prints the limit alongside the schedule, and
+`-ExecutionTimeLimitHours` changes it.
+
 ### An error appears twice in the transcript
 
 One error, two identical blocks in `Update-Everything-<timestamp>.log`. **This is
@@ -750,7 +766,7 @@ while the machine was off happens shortly after your next logon.
 | `RunOnlyIfNetworkAvailable` | on | Nothing to update without a network. |
 | Battery | won't start, stops if unplugged | A full pass is heavy. Override with `-AllowBattery`. |
 | `RandomDelay` | 15 min | Spreads the start time. Set with `-RandomDelayMinutes`. |
-| `ExecutionTimeLimit` | 2 hours | A wedged installer would otherwise hold the task open until reboot. |
+| `ExecutionTimeLimit` | 2 hours | A wedged installer would otherwise hold the task open until reboot. Set with `-ExecutionTimeLimitHours`; the next run reports a run this stopped. |
 | `MultipleInstances` | `IgnoreNew` | A second run would fight the first for the same managers and logs. |
 | `RestartCount` / `RestartInterval` | 2 / 30 min | Transient network failures are the common case. |
 | `WakeToRun` | off | `StartWhenAvailable` picks it up once the machine is awake. |
