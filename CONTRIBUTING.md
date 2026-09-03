@@ -354,9 +354,11 @@ uninteresting: a cleanup that may find nothing, a probe of a key that may not
 exist. An empty `catch {}` is not. Every catch says what it swallowed via
 `Write-Verbose`, so `-Verbose` shows what was ignored.
 
-The standalone scripts — `Install.ps1`, `Publish.ps1`, `test.ps1` — do set
-`$ErrorActionPreference = 'Stop'` at the top. They own their session; the module
-does not.
+The standalone scripts — `Install.ps1`, `Publish.ps1`, `test.ps1`, and the
+shipped `src\Convert-PowerShell7ToMsi.ps1` — do set
+`$ErrorActionPreference = 'Stop'` at the top. Each owns its session: the mover
+runs only in its own process via `-File`, never dot-sourced by the loader. The
+module itself does not set it.
 
 Logging is the exception to all of it. A failure to write a log must never be
 the thing that kills a run, so `Write-StepLog` degrades to a warning rather than
@@ -515,8 +517,9 @@ longer exists. Assert both ways.
   trigger object's properties passed, because nothing handed that object to
   `Register-ScheduledTask`. Reach for this only when the failure is provably
   invisible from either side, and leave the test able to skip when it cannot run.
-- No new `exit` in `src`, no `$ErrorActionPreference` in `src`, no empty
-  `catch`.
+- No new `exit` and no `$ErrorActionPreference` in anything the loader
+  dot-sources. The shipped mover script sets and owns both, in its own
+  process. No empty `catch`.
 - Comments state facts about the code, not its history. The story of the change
   belongs in the commit message and the pull request, where it stays accurate.
 - Commit messages say what changed and why, in the imperative, with the evidence

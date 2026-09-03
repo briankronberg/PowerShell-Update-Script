@@ -5,8 +5,11 @@ function Get-GalleryModuleStatus {
         the PowerShell Gallery.
 
         .DESCRIPTION
-        Returns Name, Installed, Available, Receipted, Updatable, Mover,
-        MoverScope and NeedsUpdate. MoverScope is the installation scope of the
+        Returns Name, Installed, Available, Receipted, ReceiptedBy, Updatable,
+        Mover, MoverScope and NeedsUpdate. ReceiptedBy names the client whose
+        receipts exist -- PSResourceGet or PowerShellGet -- whether or not one
+        of them covers the newest copy, so advice can name the reinstall
+        command that lineage answers to. MoverScope is the installation scope of the
         covering receipt -- CurrentUser or AllUsers -- because Update-PSResource
         must be told when the copy to move is the machine-wide one.
 
@@ -69,13 +72,14 @@ function Get-GalleryModuleStatus {
     # as its own, so its answer exists more often, and Update-PSResource is
     # then the client that moves the copy.
     $receipted = $false
+    $receiptedBy = $null
     $updatable = $false
     $mover = $null
     $moverScope = $null
     if ($present.Count) {
         foreach ($client in @(
-                @{ Reader = 'Get-InstalledPSResource'; Mover = 'Update-PSResource' }
-                @{ Reader = 'Get-InstalledModule';     Mover = 'Update-Module' }
+                @{ Reader = 'Get-InstalledPSResource'; Mover = 'Update-PSResource'; Client = 'PSResourceGet' }
+                @{ Reader = 'Get-InstalledModule';     Mover = 'Update-Module';     Client = 'PowerShellGet' }
             )) {
             if (-not (Get-Command $client.Reader -ErrorAction SilentlyContinue)) { continue }
 
@@ -90,6 +94,7 @@ function Get-GalleryModuleStatus {
             }
             if (-not $receipts.Count) { continue }
             $receipted = $true
+            if (-not $receiptedBy) { $receiptedBy = $client.Client }
 
             foreach ($receipt in $receipts) {
                 $raw = "$($receipt.Version)" -replace '-.*$', ''
@@ -147,6 +152,7 @@ function Get-GalleryModuleStatus {
         Installed   = $installed
         Available   = $available
         Receipted   = $receipted
+        ReceiptedBy = $receiptedBy
         Updatable   = $updatable
         Mover       = $mover
         MoverScope  = $moverScope

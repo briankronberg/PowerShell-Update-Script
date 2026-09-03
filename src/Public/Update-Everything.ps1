@@ -527,7 +527,7 @@
                             }
                             # A per-user lineage moves without elevation: -Scope
                             # defaults to CurrentUser by documented design.
-                            $moveArgs = @{ Name = 'UpdateEverything'; TrustRepository = $true; Confirm = $false; ErrorAction = 'Stop' }
+                            $moveArgs = @{ Name = 'UpdateEverything'; TrustRepository = $true; AcceptLicense = $true; Confirm = $false; ErrorAction = 'Stop' }
                             if ($status.MoverScope -eq 'AllUsers') { $moveArgs.Scope = 'AllUsers' }
                             Update-PSResource @moveArgs
                         } else {
@@ -933,7 +933,7 @@
             if ($status.Installed -and $status.Updatable) {
                 Write-Output "$name $($status.Installed) -> $($status.Available)..."
                 if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
-                    Update-PSResource -Name $name -TrustRepository -Confirm:$false -ErrorAction Stop
+                    Update-PSResource -Name $name -TrustRepository -AcceptLicense -Confirm:$false -ErrorAction Stop
                 } else {
                     Update-Module -Name $name -Force -Confirm:$false -ErrorAction Stop
                 }
@@ -1075,6 +1075,7 @@
                 $null = & py help install 2>&1
                 $isManager = ($LASTEXITCODE -eq 0)
             } catch {
+                Write-Verbose "py resolved but could not start: $($_.Exception.Message)"
                 $isManager = $false
             } finally {
                 Pop-Location

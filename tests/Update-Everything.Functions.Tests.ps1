@@ -1433,9 +1433,8 @@ Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
     }
 
     # PSResourceGet ships in the box with PowerShell 7.4 and its receipts are
-    # invisible to Get-InstalledModule -- measured on a real machine, 16
-    # receipts against 2. A copy installed with Install-PSResource counts as a
-    # gallery install, moved by Update-PSResource.
+    # invisible to Get-InstalledModule. A copy installed with Install-PSResource
+    # counts as a gallery install, moved by Update-PSResource.
     It 'reads a PSResourceGet receipt that PowerShellGet cannot see' {
         Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
         Mock Get-InstalledPSResource { [pscustomobject]@{ Name = 'Pester'; Version = $script:PesterVersion } }
@@ -1486,9 +1485,21 @@ Describe 'Get-GalleryModuleStatus' -Tag 'Unit' {
         (Get-GalleryModuleStatus -Name Pester).Mover | Should-BeNull
     }
 
+    # Even a receipt that covers nothing names its client, so advice can say
+    # which reinstall command this machine answers to.
+    It 'names the client holding the receipts even when none covers' {
+        Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
+        Mock Get-InstalledPSResource { [pscustomobject]@{ Name = 'Pester'; Version = [version] '0.0.1' } }
+        Mock Get-InstalledModule { }
+
+        $status = Get-GalleryModuleStatus -Name Pester
+        $status.ReceiptedBy | Should-Be 'PSResourceGet'
+        $status.Mover       | Should-BeNull
+    }
+
     # Get-InstalledPSResource without -Scope reads only the per-user paths, so
-    # the machine scope is asked separately. Measured on a real machine: an
-    # AllUsers install had a receipt on disk and the bare call returned nothing.
+    # an AllUsers receipt stays invisible until the machine scope is asked
+    # separately.
     It 'sees an AllUsers receipt the bare call misses' {
         Mock Find-Module { [pscustomobject]@{ Version = '9.9.9' } }
         Mock Get-InstalledPSResource { }
@@ -2781,12 +2792,13 @@ Describe 'Format-SelfVersionStatus' -Tag 'Unit' {
 
     BeforeAll {
         $script:StatusOf = {
-            param($Installed, $Available, $Updatable = $true)
+            param($Installed, $Available, $Updatable = $true, $ReceiptedBy = $null)
             [pscustomobject]@{
                 Name        = 'UpdateEverything'
                 Installed   = if ($Installed) { [version] $Installed } else { $null }
                 Available   = if ($Available) { [version] $Available } else { $null }
                 Updatable   = $Updatable
+                ReceiptedBy = $ReceiptedBy
                 NeedsUpdate = [bool] ($Installed -and $Available -and ([version]$Available -gt [version]$Installed))
             }
         }
@@ -2846,6 +2858,20 @@ Describe 'Format-SelfVersionStatus' -Tag 'Unit' {
     It 'sends a behind copy that is installed nowhere to Install-Module' {
         $line = Format-SelfVersionStatus -Running '1.0.0' -Status (& $script:StatusOf $null '1.2.0' $false)
         $line | Should-MatchString 'outside a module path'
+        $line | Should-MatchString ([regex]::Escape('Install-Module UpdateEverything -Force'))
+    }
+
+    # The reinstall command should be the one this machine's receipts answer
+    # to: a PSResourceGet lineage reinstalls through Install-PSResource, a
+    # PowerShellGet one through Install-Module.
+    It 'names Install-PSResource on a PSResourceGet lineage the gallery cannot move' {
+        $line = Format-SelfVersionStatus -Running '1.1.0' -Status (& $script:StatusOf '1.1.0' '1.2.0' $false 'PSResourceGet')
+        $line | Should-MatchString ([regex]::Escape('Install-PSResource UpdateEverything -Reinstall'))
+        $line | Should-NotMatchString ([regex]::Escape('Install-Module UpdateEverything -Force'))
+    }
+
+    It 'still names Install-Module on a PowerShellGet lineage' {
+        $line = Format-SelfVersionStatus -Running '1.1.0' -Status (& $script:StatusOf '1.1.0' '1.2.0' $false 'PowerShellGet')
         $line | Should-MatchString ([regex]::Escape('Install-Module UpdateEverything -Force'))
     }
 }

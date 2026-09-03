@@ -49,7 +49,14 @@ function Format-SelfVersionStatus {
         $how = if (-not $Status.Installed) {
             'This copy is running from outside a module path, so use "Install-Module UpdateEverything -Force" to install the gallery copy.'
         } elseif (-not $Status.Updatable) {
-            'This copy did not come from the gallery, so use "Install-Module UpdateEverything -Force", or -UpdateSelf -UpdateSelfSource Main to track the branch it came from.'
+            # The reinstall command should be the one this machine's receipts
+            # answer to; a PSResourceGet lineage reinstalls through
+            # Install-PSResource.
+            if ($Status.ReceiptedBy -eq 'PSResourceGet') {
+                'This copy is not the one the gallery receipts cover, so use "Install-PSResource UpdateEverything -Reinstall", or -UpdateSelf -UpdateSelfSource Main to track the branch it came from.'
+            } else {
+                'This copy did not come from the gallery, so use "Install-Module UpdateEverything -Force", or -UpdateSelf -UpdateSelfSource Main to track the branch it came from.'
+            }
         } else {
             'Run with -UpdateSelf to update it.'
         }
