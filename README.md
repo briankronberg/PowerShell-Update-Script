@@ -299,13 +299,13 @@ read against the code that made it:
 
 ```
 Maintenance run started 09/01/2026 08:14  |  Admin: True  |  Main Log: ...
-UpdateEverything 1.7.3
+UpdateEverything 1.8.0
 ```
 
 The Inventory step then compares that against the gallery:
 
 ```
-UpdateEverything 1.7.3 is running, which is the newest published version.
+UpdateEverything 1.8.0 is running, which is the newest published version.
 ```
 
 The comparison lives there rather than in the banner because it costs a network
