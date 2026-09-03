@@ -30,8 +30,7 @@ function Get-UpdateToolInventory {
         The tools to look for. Defaults to the ones this module drives; a test
         passes its own. Each entry names the Command, the VersionArgument that
         makes it print its version (null to record presence only), and
-        optionally the OutputEncoding the tool writes when it is not the
-        console's, as a name Encoding.GetEncoding accepts.
+        optionally Environment, a hashtable of variables set for that one call.
 
         .EXAMPLE
         Get-UpdateToolInventory | Where-Object Present
@@ -71,8 +70,9 @@ function Get-UpdateToolInventory {
             @{ Name = 'Google Cloud CLI'; Command = 'gcloud'; VersionArgument = $null }
             @{ Name = 'VS Code';         Command = 'code';    VersionArgument = $null }
             @{ Name = 'MiKTeX';          Command = 'miktex';  VersionArgument = '--version' }
-            # wsl.exe writes UTF-16 to stdout.
-            @{ Name = 'WSL';             Command = 'wsl';     VersionArgument = '--version'; OutputEncoding = 'utf-16' }
+            # wsl.exe writes UTF-16 or single-byte text depending on where it
+            # runs; WSL_UTF8=1 makes it write UTF-8 everywhere.
+            @{ Name = 'WSL';             Command = 'wsl';     VersionArgument = '--version'; Environment = @{ WSL_UTF8 = '1' } }
         )
     }
 
@@ -107,12 +107,15 @@ function Get-UpdateToolInventory {
         # value, and none of these are worth the wait.
         $version = $null
         if ($tool.VersionArgument) {
-            # Native output is decoded with the console's output encoding, so a
-            # tool that writes another one is read with that one, briefly.
-            $consoleEncoding = [Console]::OutputEncoding
+            # A tool that needs a variable to answer plainly gets it for this
+            # call only; whatever the variable held before comes back after.
+            $previousEnvironment = @{}
             try {
-                if ($tool.OutputEncoding) {
-                    [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding($tool.OutputEncoding)
+                if ($tool.Environment) {
+                    foreach ($name in @($tool.Environment.Keys)) {
+                        $previousEnvironment[$name] = [Environment]::GetEnvironmentVariable($name)
+                        [Environment]::SetEnvironmentVariable($name, [string]$tool.Environment[$name])
+                    }
                 }
                 $raw = & $tool.Command $tool.VersionArgument 2>&1
                 $global:LASTEXITCODE = 0
@@ -123,7 +126,9 @@ function Get-UpdateToolInventory {
                 Write-Verbose "$($tool.Command) $($tool.VersionArgument) failed: $($_.Exception.Message)"
                 $global:LASTEXITCODE = 0
             } finally {
-                if ($tool.OutputEncoding) { [Console]::OutputEncoding = $consoleEncoding }
+                foreach ($name in @($previousEnvironment.Keys)) {
+                    [Environment]::SetEnvironmentVariable($name, $previousEnvironment[$name])
+                }
             }
         }
 
