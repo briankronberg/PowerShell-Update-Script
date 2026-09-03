@@ -13,7 +13,12 @@
     param(
         # The caller's -AllowInstall list, consulted before BurntToast is pulled
         # from the PowerShell Gallery.
-        [string[]] $Approved = @()
+        [string[]] $Approved = @(),
+
+        # Notifications are on by default rather than asked for. A missing
+        # prerequisite is then a note for the summary, not a warning, and no
+        # install is offered unless -AllowInstall names it.
+        [switch] $Implied
     )
 
     # A toast is drawn by the shell in an interactive desktop session. From a
@@ -21,11 +26,16 @@
     # and the call either fails or posts a notification nobody can see.
     if (-not (Test-InteractiveSession)) {
         $reason = 'this is not an interactive session, so a toast has no desktop to appear on. Schedule the task to run as your own user while logged on.'
-        Write-Warning "Notifications requested, but $reason"
+        if ($Implied) { Write-Verbose "Notifications are on by default, but $reason" }
+        else          { Write-Warning "Notifications requested, but $reason" }
         return [pscustomobject]@{ Available = $false; Reason = $reason }
     }
 
     if (-not (Get-Module BurntToast -ListAvailable)) {
+        if ($Implied -and -not ($Approved -contains 'All' -or $Approved -contains 'BurntToast')) {
+            $reason = 'the BurntToast module is not installed. "Install-Module BurntToast -Scope CurrentUser" adds a toast when a run finishes.'
+            return [pscustomobject]@{ Available = $false; Reason = $reason }
+        }
         if (-not (Approve-Install -Component 'BurntToast' -Approved $Approved `
                 -Description 'Notifications were requested with -Notify, but the BurntToast module is not installed. This would install it from the PowerShell Gallery for the current user only.')) {
             $reason = 'the BurntToast module is not installed, and installing it was not approved. Install it with "Install-Module BurntToast -Scope CurrentUser", or re-run with -AllowInstall BurntToast.'

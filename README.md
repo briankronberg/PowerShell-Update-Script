@@ -272,7 +272,8 @@ thing that crosses a process boundary.
 | `-PromptBeforeRun` | off | Pause before starting and offer: run now, skip, or wait. Takes the default after `-PromptTimeoutSeconds`. |
 | `-PromptTimeoutSeconds` | `60` | How long that prompt waits before starting anyway. |
 | `-DelayMinutes` | `60` | How long the "wait, then run" answer waits. |
-| `-Notify` | off | Show a toast when the run finishes, plus an urgent one if a restart is needed. Intended for scheduled runs. |
+| `-Notify` | on | Show a toast when the run finishes, plus an urgent one if a restart is needed. Needs BurntToast; without it the summary says so in one line. `-Notify:$false` turns it off. |
+| `-Attended` | off | Hold the window open after the summary until a key is pressed, for a run started from a shortcut. Closes on its own after `-PromptTimeoutSeconds` when given, otherwise ten minutes. |
 | `-AllowInstall` | *(none)* | Which missing components may be installed: `All`, or any of `PowerShell7`, `PSWindowsUpdate`, `NuGetProvider`, `BurntToast`, `PowerShellGet`, `PSResourceGet`. |
 | `-Tag` | *(all)* | Run only the steps carrying one of these tags. Everything else is reported as skipped. |
 | `-ExcludeTag` | *(none)* | Run everything except the steps carrying one of these tags. Exclusion wins when both are given. |
@@ -617,12 +618,13 @@ skips its step rather than failing it, so it stays out of `FailedCount`.
 
 ## Notifications
 
-`-Notify` raises two Windows toasts, a summary when the run finishes and a
-restart notice marked *urgent* when Windows is waiting on a reboot. Urgent
-notifications break through Focus Assist; ordinary ones do not.
+Every run raises two Windows toasts when it can: a summary when the run
+finishes, and a restart notice marked *urgent* when Windows is waiting on a
+reboot. Urgent notifications break through Focus Assist; ordinary ones do not.
+Turn them off with:
 
 ```powershell
-Update-Everything -Notify
+Update-Everything -Notify:$false
 ```
 
 Notifications need the [BurntToast](https://github.com/Windos/BurntToast) module:
@@ -631,13 +633,29 @@ Notifications need the [BurntToast](https://github.com/Windos/BurntToast) module
 Install-Module BurntToast -Scope CurrentUser
 ```
 
-It is an optional dependency. If the module is missing, or the run has no
-interactive desktop session, the update proceeds as normal and you are told in
-three places: when registering the scheduled task, at the start of the run, and
-again in the closing summary.
+It is an optional dependency. Without it, or without an interactive desktop
+session, the update proceeds as normal. A run that did not ask for `-Notify`
+says so in one line of the closing summary and offers nothing for install. A
+run that passed `-Notify` is told at the start, again in the summary, and
+offered the install; a task registered with notifications is told at
+registration.
 
 Toasts are drawn into an interactive desktop session, so a task running as
 `SYSTEM` cannot show one. This is why the scheduled task runs as you.
+
+## Attended runs
+
+A run started from a shortcut or a Start-menu pin closes its window as soon as
+it finishes, before anything can be read. `-Attended` holds it:
+
+```powershell
+Update-Everything -Attended
+```
+
+After the summary the window waits for a key, and closes on its own after
+`-PromptTimeoutSeconds` when that is given, otherwise ten minutes. The default
+is unattended: a scheduled task never passes `-Attended`, and one that carries
+it in `-ExtraArgument` is warned at registration.
 
 ## Pausing before a run
 

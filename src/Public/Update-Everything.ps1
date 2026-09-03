@@ -124,17 +124,28 @@
     .PARAMETER DelayMinutes
         How long the "wait, then run" answer waits. Default: 60.
 
+    .PARAMETER Attended
+        Hold the window open after the summary until a key is pressed, for a run
+        started from a shortcut or a Start-menu pin, where the window would
+        otherwise close before anything could be read. Off by default, and a
+        scheduled task never passes it. The hold ends on its own after
+        -PromptTimeoutSeconds when that is given, otherwise after ten minutes, so
+        an -Attended left in a task cannot hold it open until its time limit.
+
     .PARAMETER Notify
         Show Windows toast notifications when the run finishes: a summary, and a
-        separate urgent notification when a restart is required. Off by default,
-        because an interactive run already prints everything to the console. Meant
-        for scheduled runs, where the summary would otherwise go unseen.
+        separate urgent notification when a restart is required. On unless
+        -Notify:$false is passed; a bare -Notify, as older scheduled tasks pass
+        it, means what it always did.
 
         Requires the BurntToast module (https://github.com/Windos/BurntToast) and an
         interactive desktop session. Either being absent degrades to no
-        notifications; it never fails the run.
+        notifications; it never fails the run. When -Notify was not passed and
+        BurntToast is not installed, the closing summary says so in one line and
+        no install is offered; pass -Notify, or -AllowInstall BurntToast, to be
+        asked.
 
-        That check happens before the first update step, not at the end, so the
+        That check happens before the first update step, not at the end, so a
         warning lands at the top of the transcript rather than after a long run.
         The reason is repeated in the closing summary, because by then the original
         warning has scrolled well out of sight.
@@ -243,6 +254,7 @@
         [ValidateRange(1, 1440)]
         [int]    $DelayMinutes            = 60,
         [switch] $Notify,
+        [switch] $Attended,
         [ValidateSet('All', 'PowerShell7', 'PSWindowsUpdate', 'NuGetProvider', 'BurntToast', 'PowerShellGet', 'PSResourceGet')]
         [string[]] $AllowInstall = @(),
         [ValidateSet('Windows', 'Microsoft', 'PowerShell', 'PackageManager', 'Python', 'Node', 'DotNet', 'Rust', 'Go', 'Cloud', 'Git', 'Editor', 'TeX', 'Self', 'Inventory')]
@@ -402,10 +414,14 @@
 
     # Resolved before any work starts, so a missing prerequisite is reported at the
     # top of the transcript and BurntToast is installed before it is needed.
+    # On by default: a run that did not pass -Notify is told about a missing
+    # prerequisite in one line and is not offered an install for it.
     $script:NotificationsAvailable = $false
     $notificationStatus = $null
+    $notifyImplied = -not $PSBoundParameters.ContainsKey('Notify')
+    if ($notifyImplied) { $Notify = $true }
     if ($Notify) {
-        $notificationStatus = Initialize-NotificationSupport -Approved $AllowInstall
+        $notificationStatus = Initialize-NotificationSupport -Approved $AllowInstall -Implied:$notifyImplied
         $script:NotificationsAvailable = $notificationStatus.Available
     }
 
@@ -1693,16 +1709,16 @@
 
     # Repeated here because the warning at startup is thousands of lines back by now.
     if ($Notify -and -not $script:NotificationsAvailable) {
-        Write-Host ''
-        Write-Host '[!] Notifications were requested but could not be sent.' -ForegroundColor Yellow
-        Write-Host "    Reason: $($notificationStatus.Reason)" -ForegroundColor Yellow
-        Write-Host '    The update run itself was unaffected.' -ForegroundColor Yellow
-    } elseif (-not $Notify) {
-        # State that nothing was asked for. Without this the run says nothing at
-        # all about notifications, which reads as a broken feature rather than an
-        # unrequested one.
-        Write-Host ''
-        Write-Host 'Notifications: not requested. Pass -Notify for a toast when the run finishes.' -ForegroundColor DarkGray
+        if ($notifyImplied) {
+            # Nothing was asked for, so a missing prerequisite is a note, not a fault.
+            Write-Host ''
+            Write-Host "Notifications: none sent; $($notificationStatus.Reason)" -ForegroundColor DarkGray
+        } else {
+            Write-Host ''
+            Write-Host '[!] Notifications were requested but could not be sent.' -ForegroundColor Yellow
+            Write-Host "    Reason: $($notificationStatus.Reason)" -ForegroundColor Yellow
+            Write-Host '    The update run itself was unaffected.' -ForegroundColor Yellow
+        }
     }
 
     # Said at the end rather than at the start: by here the run has shown what
@@ -1718,6 +1734,15 @@
     Write-Host "Finished $(Get-Date). Detailed logs saved to: $logDir" -ForegroundColor Green
     if ($failedSteps.Count) {
         Write-Host "$($failedSteps.Count) step(s) failed." -ForegroundColor Red
+    }
+
+    # After the summary and before the transcript closes, so the hold is on
+    # record. -PromptTimeoutSeconds bounds it when given; otherwise ten minutes,
+    # long enough to read and short enough that an -Attended left in a task
+    # cannot hold it open until the task's time limit.
+    if ($Attended) {
+        $holdSeconds = if ($PSBoundParameters.ContainsKey('PromptTimeoutSeconds')) { $PromptTimeoutSeconds } else { 600 }
+        Wait-AttendedExit -TimeoutSeconds $holdSeconds
     }
 
     if ($transcriptRunning) { try { Stop-Transcript | Out-Null } catch { Write-Verbose "Transcript already stopped." } }
