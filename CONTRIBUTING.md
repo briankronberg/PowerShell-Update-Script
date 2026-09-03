@@ -544,7 +544,7 @@ self-update lands, set the precedent:
 |---|---|
 | 1.2.0, 1.3.0, 1.4.0 | PowerShell Gallery, and GitHub |
 | 1.2.1, 1.2.2 | GitHub only |
-| 1.7.1 | PowerShell Gallery, and GitHub |
+| 1.7.1, 1.7.2 | PowerShell Gallery, and GitHub |
 
 Every gallery version is permanent -- unlist hides it from search and leaves it
 installable -- so each one is a commitment, and fewer of them means fewer to
@@ -595,7 +595,7 @@ Afterwards, tag the exact commit that was published, so the permanent version
 has something in the history pointing at it:
 
 ```bash
-git tag -a v1.7.1 -m "1.7.1" && git push origin v1.7.1
+git tag -a v1.7.2 -m "1.7.2" && git push origin v1.7.2
 ```
 
 Then cut a GitHub release at that tag, reusing the manifest's `ReleaseNotes` so
