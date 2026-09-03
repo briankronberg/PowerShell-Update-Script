@@ -909,7 +909,8 @@ Describe 'Variable hygiene' -Tag 'Static' {
             'ShellId', 'NestedPromptLevel', 'StackTrace', 'switch', 'foreach',
             # Set by the module loader, and by the caller of a private helper.
             'ModuleRoot', 'Results', 'logDir', 'runStamp', 'isAdmin', 'InstallDecision',
-            'NotificationsAvailable', 'WingetNothingToDo', 'TagFilter', 'ExcludeTagFilter'
+            'NotificationsAvailable', 'WingetNothingToDo', 'TagFilter', 'ExcludeTagFilter',
+            'RefreshPathAfterStep'
         )
 
         $bare = { param($p) ($p -replace '^(script|global|local|private):', '') }

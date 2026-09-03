@@ -1993,6 +1993,108 @@ Describe 'Get-UpdateToolInventory' -Tag 'Unit' {
     }
 }
 
+Describe 'Update-ProcessPath' -Tag 'Unit' {
+
+    # The hives are passed in as strings, so nothing here reads the registry or
+    # depends on the machine. $env:PATH is the one thing it changes, and it is
+    # put back after every test.
+
+    BeforeEach {
+        $script:RealPath = $env:PATH
+    }
+
+    AfterEach {
+        $env:PATH = $script:RealPath
+    }
+
+    It 'adds hive entries the process did not have, and returns them' {
+        $env:PATH = 'C:\tools'
+
+        $gained = @(Update-ProcessPath -MachinePath 'C:\tools;C:\new' -UserPath 'C:\me')
+
+        $gained | Should-BeCollection @('C:\new', 'C:\me')
+        $env:PATH | Should-Be 'C:\tools;C:\new;C:\me'
+    }
+
+    # An activated venv or a per-session prepend is in neither hive. It stays,
+    # and it stays first, so what it shadowed is still shadowed.
+    It 'keeps process-only entries, ahead of the hives' {
+        $env:PATH = 'C:\venv\Scripts;C:\tools'
+
+        $null = Update-ProcessPath -MachinePath 'C:\tools' -UserPath ''
+
+        $env:PATH | Should-Be 'C:\venv\Scripts;C:\tools'
+    }
+
+    It 'expands %variables% the way the registry stores them' {
+        $env:PATH = 'C:\tools'
+
+        $gained = @(Update-ProcessPath -MachinePath '%SystemRoot%\ue-test' -UserPath '')
+
+        $gained | Should-BeCollection @("$env:SystemRoot\ue-test")
+    }
+
+    It 'treats casing and a trailing backslash as the same directory' {
+        $env:PATH = 'c:\tools\'
+
+        $gained = @(Update-ProcessPath -MachinePath 'C:\Tools' -UserPath '')
+
+        $gained | Should-BeCollection -Count 0
+        ($env:PATH -split ';') | Should-BeCollection -Count 1
+    }
+
+    It 'returns nothing the second time, because nothing is new' {
+        $env:PATH = 'C:\tools'
+        $null = Update-ProcessPath -MachinePath 'C:\tools;C:\new' -UserPath ''
+
+        @(Update-ProcessPath -MachinePath 'C:\tools;C:\new' -UserPath '') | Should-BeCollection -Count 0
+    }
+
+    # Unreadable hives must not turn into an empty PATH.
+    It 'leaves PATH alone when both hives are empty' {
+        $env:PATH = 'C:\tools;C:\venv'
+
+        @(Update-ProcessPath -MachinePath '' -UserPath '') | Should-BeCollection -Count 0
+        $env:PATH | Should-Be 'C:\tools;C:\venv'
+    }
+
+    # An exception here fails the test on its own; the point is that the real
+    # registry read completes on whatever machine runs the suite.
+    It 'reads the real hives when none are given, without throwing' {
+        $null = Update-ProcessPath
+    }
+}
+
+Describe 'The run refreshes PATH between steps' -Tag 'Static' {
+
+    BeforeAll {
+        $script:StepSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Invoke-Step.ps1') -Raw
+        $script:RunSource = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    It 'refreshes after a step, and says what was gained' {
+        $script:StepSource | Should-MatchString ([regex]::Escape('$gained = @(Update-ProcessPath)'))
+        $script:StepSource | Should-MatchString 'PATH gained:'
+    }
+
+    # Without the opening sync, the first step would report everything added
+    # since the session started, none of which this run did.
+    It 'syncs once, quietly, before the first step' {
+        $sync  = $script:RunSource.IndexOf('$null = Update-ProcessPath')
+        $first = $script:RunSource.IndexOf("Invoke-Step -Name 'Inventory'")
+
+        $sync | Should-BeGreaterThan -1
+        $sync | Should-BeLessThan $first
+    }
+
+    It 'only refreshes when the run turned it on' {
+        $script:StepSource | Should-MatchString ([regex]::Escape('if ($script:RefreshPathAfterStep)'))
+        $script:RunSource  | Should-MatchString ([regex]::Escape('$script:RefreshPathAfterStep = $true'))
+    }
+}
+
 Describe 'Step order' -Tag 'Static' {
 
     # The order is a contract, not a preference, so it is asserted rather than

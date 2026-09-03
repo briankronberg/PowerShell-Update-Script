@@ -411,6 +411,13 @@
 
     $script:Results = [System.Collections.Generic.List[object]]::new()
 
+    # The process PATH is brought level with the registry once, quietly, before
+    # any step runs, so the per-step refresh in Invoke-Step reports only what
+    # this run's steps installed rather than whatever was added since this
+    # session started.
+    $null = Update-ProcessPath
+    $script:RefreshPathAfterStep = $true
+
     # Read by Invoke-Step, which decides per step. Script scope for the same reason
     # as $script:isAdmin: a step action runs inside Invoke-Step, not here.
     $script:TagFilter        = $Tag

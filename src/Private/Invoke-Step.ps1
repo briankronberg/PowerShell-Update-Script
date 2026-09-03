@@ -160,4 +160,18 @@
         Write-StepLog -Path $stepLog -Message "FAILED | $_"
         $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Failed'; Seconds = $secs; Log = $stepLog })
     }
+
+    # A step that installed a manager has changed the machine or user PATH, and
+    # this process still has the PATH it started with. Refreshing here lets the
+    # next step's -RequiresCommand find what this one installed. Update-Everything
+    # enables it after its own opening sync, so only what changed during the run
+    # is reported; a caller that never set it gets no registry reads.
+    if ($script:RefreshPathAfterStep) {
+        $gained = @(Update-ProcessPath)
+        if ($gained.Count) {
+            $msg = "PATH gained: $($gained -join '; ')"
+            Write-Host $msg -ForegroundColor DarkGray
+            Write-StepLog -Path $stepLog -Message $msg
+        }
+    }
 }
