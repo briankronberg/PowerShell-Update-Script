@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.7.2'
+    ModuleVersion     = '1.7.3'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -33,24 +33,30 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.7.2
+            ReleaseNotes = '# 1.7.3
 
-Fixes from a standards-and-spec review of everything since 1.5.0.
+Fixes from a full run of 1.7.2 on a live machine.
 
-## The advice matches the receipts
+## The Terminal default stays where you put it
 
-The status behind the version banner reports which gallery client holds the
-receipts on this machine, and the advice follows it: a PSResourceGet lineage
-the gallery cannot move is pointed at "Install-PSResource UpdateEverything
--Reinstall" rather than at Install-Module, which answers a different
-lineage.
+Windows Terminal generates one PowerShell 7 profile per pwsh install it has
+seen, so a machine that moved from the Store package to the MSI has two. The
+Terminal-default step compared against the first one only and moved a
+default that already named the second, on every run. It now recognises any
+pwsh profile -- generated or hand-written, by GUID or by name -- and leaves
+a default that points at one alone.
 
-## Robustness
+## The inventory reports every version it can
 
-Both Update-PSResource calls pass -AcceptLicense, so a module that requires
-accepting a license cannot stall an unattended run. The Python launcher
-probe says through Write-Verbose what it swallowed when a py that resolves
-cannot start.
+The Python install manager prints its version at the head of help and
+nothing for --version, so help is what gets asked. wsl.exe writes UTF-16,
+which used to arrive unreadable; it is now read as what it is, so WSL shows
+its version too.
+
+## Windows Update says what it found
+
+When the scan offers nothing, the step says so, and names whether Microsoft
+Update was part of the scan, instead of finishing in silence.
 '
 
         }
