@@ -207,6 +207,15 @@
         Delete logs and settings.json backups in the log directory older than this
         many days. Default: 30. Set to 0 to keep everything.
 
+    .PARAMETER StepTimeoutMinutes
+        How long any one step may run before its child processes are stopped
+        and the step is recorded as Failed, so the run goes on to its summary,
+        its toast and its reboot check instead of being stopped whole at the
+        task's execution time limit. Default: 0, no limit. Stops the native
+        commands a step started -- winget, msiexec, npm -- and not a step that
+        hangs inside a cmdlet in this process, such as a Windows Update scan
+        that never returns.
+
     .OUTPUTS
         An object describing the run:
 
@@ -263,6 +272,8 @@
         [string[]] $ExcludeTag = @(),
         [ValidateRange(0, 3650)]
         [int]    $LogRetentionDays       = 30,
+        [ValidateRange(0, 1440)]
+        [int]    $StepTimeoutMinutes     = 0,
         [switch] $UpdateSelf,
         [ValidateSet('Gallery', 'Main')]
         [string] $UpdateSelfSource = 'Gallery'
@@ -433,6 +444,9 @@
     # session started.
     $null = Update-ProcessPath
     $script:RefreshPathAfterStep = $true
+
+    # Read by Invoke-Step, which arms a watchdog per step when this is set.
+    $script:StepTimeoutSeconds = $StepTimeoutMinutes * 60
 
     # Read by Invoke-Step, which decides per step. Script scope for the same reason
     # as $script:isAdmin: a step action runs inside Invoke-Step, not here.

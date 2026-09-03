@@ -278,6 +278,7 @@ thing that crosses a process boundary.
 | `-Tag` | *(all)* | Run only the steps carrying one of these tags. Everything else is reported as skipped. |
 | `-ExcludeTag` | *(none)* | Run everything except the steps carrying one of these tags. Exclusion wins when both are given. |
 | `-LogRetentionDays` | `30` | Prune logs and settings.json backups older than this. `0` keeps everything. |
+| `-StepTimeoutMinutes` | `0` | Stop a step's child processes after this long and fail the step alone, so the run still reaches its summary. `0` means no per-step limit. |
 | `-UpdateSelf` | off | Update this module through `Update-Module` and run nothing else. `-Tag`/`-ExcludeTag` are ignored; no UAC prompt is raised, and an all-users copy is reported as needing an elevated session. Takes effect on the **next** run: the module is already loaded, so the files change and the running code does not. |
 | `-UpdateSelfSource` | `Gallery` | Where `-UpdateSelf` gets it from. `Gallery` is the newest published release; `Main` is the development head, fetched from GitHub. |
 
@@ -672,6 +673,26 @@ After the summary the window waits for a key, and closes on its own after
 `-PromptTimeoutSeconds` when that is given, otherwise ten minutes. The default
 is unattended: a scheduled task never passes `-Attended`, and one that carries
 it in `-ExtraArgument` is warned at registration.
+
+## Step timeouts
+
+A step that hangs -- a `winget` waiting on a dialog nobody sees -- runs until
+Task Scheduler stops the whole process at the execution time limit, with no
+summary, no toast and no reboot check. `-StepTimeoutMinutes` puts a budget on
+each step instead:
+
+```powershell
+Update-Everything -StepTimeoutMinutes 30
+Register-UpdateEverythingTask -Cadence Weekly -StepTimeoutMinutes 30
+```
+
+When a step runs past it, the processes it started are stopped, the step is
+recorded as Failed with `Exceeded the step timeout of 30 minute(s); stopped:
+winget.exe (1234)`, and the run continues. Steps run in-process, so the budget
+is enforced by a watchdog thread that stops the step's child processes; a step
+that hangs inside a cmdlet in this process, such as a Windows Update scan that
+never returns, has no child to stop and is not helped. The execution time limit
+remains the backstop for that.
 
 ## Pausing before a run
 

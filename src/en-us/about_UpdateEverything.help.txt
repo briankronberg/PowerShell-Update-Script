@@ -59,6 +59,10 @@ NOTIFICATIONS
     pressed, for a run started from a shortcut. It closes on its own after
     -PromptTimeoutSeconds when given, otherwise ten minutes.
 
+    -StepTimeoutMinutes stops a step's child processes after that long and
+    fails the step alone, so the run still reaches its summary. It cannot
+    stop a step hung inside a cmdlet in this process.
+
     A task running as SYSTEM cannot show a notification, which is why
     Register-UpdateEverythingTask registers the task to run as you.
 

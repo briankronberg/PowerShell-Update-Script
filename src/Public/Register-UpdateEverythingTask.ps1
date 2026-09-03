@@ -95,6 +95,12 @@
         Stop the task if it runs longer than this. Default: 2. Without a limit,
         one wedged installer leaves the task running until the machine reboots.
 
+    .PARAMETER StepTimeoutMinutes
+        Passed to the run: how long any one step may run before its child
+        processes are stopped and the step fails alone, so the run reaches its
+        summary instead of being stopped whole at the execution time limit.
+        Default: 0, no per-step limit.
+
     .PARAMETER Force
         Replace an existing task of the same name without prompting.
 
@@ -159,6 +165,9 @@
         [ValidateRange(1, 24)]
         [int] $ExecutionTimeLimitHours = 2,
 
+        [ValidateRange(0, 1440)]
+        [int] $StepTimeoutMinutes = 0,
+
         [switch] $Force
     )
 
@@ -179,7 +188,7 @@
         -WindowStyle $effectiveWindowStyle -PromptBeforeRun:$PromptBeforeRun `
         -PromptTimeoutSeconds $PromptTimeoutSeconds `
         -AllowInstall $AllowInstall -Tag $Tag -ExcludeTag $ExcludeTag `
-        -ExtraArgument $ExtraArgument
+        -StepTimeoutMinutes $StepTimeoutMinutes -ExtraArgument $ExtraArgument
 
     # A task has nobody at the window, so an -Attended run would hold every
     # window open until the hold timed out.
@@ -237,6 +246,9 @@
     $windowNote = if ($PromptBeforeRun) { ", prompting first (${PromptTimeoutSeconds}s to answer)" } else { '' }
     Write-Host "  Window   : ${effectiveWindowStyle}${windowNote}"
     Write-Host "  Limit    : $ExecutionTimeLimitHours hour(s), after which Task Scheduler stops the run; the next run says so"
+    if ($StepTimeoutMinutes -gt 0) {
+        Write-Host "  Per step : $StepTimeoutMinutes minute(s), after which a step's child processes are stopped and the step fails alone"
+    }
     Write-Host ''
     Write-Host '  The task runs only while you are logged on, so that it can show notifications.'
     Write-Host '  A run missed while the machine was off happens shortly after your next logon.'

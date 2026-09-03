@@ -75,6 +75,13 @@
     # Non-terminating errors still reach $stepOutput and are still counted below.
     $ErrorActionPreference = 'Continue'
 
+    # Armed only when the run asked for a step budget. See Start-StepWatchdog
+    # for what it can and cannot stop.
+    $watchdog = $null
+    if ($script:StepTimeoutSeconds -gt 0) {
+        $watchdog = Start-StepWatchdog -TimeoutSeconds $script:StepTimeoutSeconds
+    }
+
     try {
         # Reset so a cmdlet-only step can't inherit a stale exit code from an earlier native command
         $global:LASTEXITCODE = 0
@@ -110,6 +117,14 @@
             Where-Object { -not (Test-ProgressRepaint -Line $_) } |
             ForEach-Object { Write-StepLog -Path $stepLog -Raw $_; $_ } |
             Out-Host
+
+        # Checked before the exit code: a child the watchdog stopped exits with
+        # whatever code a killed process reports, and the reason is the budget.
+        if ($watchdog -and $watchdog.State.Fired) {
+            $budget = if ($watchdog.Seconds % 60 -eq 0) { "$($watchdog.Seconds / 60) minute(s)" } else { "$($watchdog.Seconds) seconds" }
+            $stopped = if ($watchdog.State.Killed.Count) { "stopped: $($watchdog.State.Killed -join ', ')" } else { 'no child process was running to stop' }
+            throw "Exceeded the step timeout of $budget; $stopped"
+        }
 
         $code = $LASTEXITCODE
         if ($null -ne $code -and $code -ne 0) {
@@ -159,6 +174,8 @@
         Write-Warning ("FAILED: $Name | $_")
         Write-StepLog -Path $stepLog -Message "FAILED | $_"
         $script:Results.Add([pscustomobject]@{ Step = $Name; Status = 'Failed'; Seconds = $secs; Log = $stepLog })
+    } finally {
+        if ($watchdog) { Stop-StepWatchdog -Watchdog $watchdog }
     }
 
     # A step that installed a manager has changed the machine or user PATH, and

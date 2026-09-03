@@ -277,6 +277,14 @@ Describe 'Get-UpdateTaskArgument' -Tag 'Unit' {
         Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-MatchString '-Notify'
     }
 
+    It 'passes a step timeout through when one is set' {
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -StepTimeoutMinutes 30 | Should-MatchString '-StepTimeoutMinutes 30'
+    }
+
+    It 'leaves the step timeout out when none is set' {
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-NotMatchString '-StepTimeoutMinutes'
+    }
+
     # Update-Everything notifies by default, so leaving -Notify out would turn
     # them back on.
     It 'says notifications are off when they are turned off' {
