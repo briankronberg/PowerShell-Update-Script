@@ -144,6 +144,78 @@ Describe 'Set-PwshAsWindowsTerminalDefault' -Tag 'Unit' {
         }
     }
 
+    Context 'A default that already names a second PowerShell 7 profile' {
+
+        # Terminal generates one PowershellCore profile per pwsh install it has
+        # seen, so two is normal on a machine that moved from the Store package
+        # to the MSI. Either is PowerShell 7.
+        BeforeEach {
+            $script:OtherPwsh = '{5fb123f1-af88-5b5c-8953-d14a8def1978}'
+            $content = '{' + [Environment]::NewLine +
+                '    "defaultProfile": "' + $script:OtherPwsh + '",' + [Environment]::NewLine +
+                '    "profiles": { "list": [' + [Environment]::NewLine +
+                '        { "guid": "' + $script:PwshGuid + '", "name": "PowerShell", "source": "Windows.Terminal.PowershellCore" },' + [Environment]::NewLine +
+                '        { "guid": "' + $script:OtherPwsh + '", "name": "PowerShell 7", "source": "Windows.Terminal.PowershellCore" }' + [Environment]::NewLine +
+                '    ] }' + [Environment]::NewLine +
+                '}'
+            Set-Content -LiteralPath $script:SettingsPath -Value $content -Encoding utf8
+        }
+
+        It 'leaves the default where the person put it' {
+            $before = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($script:SettingsPath))
+            Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 6>$null
+            $after = [Convert]::ToBase64String([System.IO.File]::ReadAllBytes($script:SettingsPath))
+
+            $after | Should-Be $before
+            @(Get-ChildItem $script:LogDir -Filter '*.json.bak') | Should-BeCollection -Count 0
+        }
+
+        It 'says the default is already PowerShell 7' {
+            $out = @(Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 6>$null)
+
+            "$($out -join ' ')" | Should-MatchString 'already PowerShell 7'
+        }
+    }
+
+    Context 'A default given as a profile name' {
+
+        # Terminal accepts a name in defaultProfile as well as a GUID.
+        BeforeEach {
+            $content = '{' + [Environment]::NewLine +
+                '    "defaultProfile": "PowerShell",' + [Environment]::NewLine +
+                '    "profiles": { "list": [ { "guid": "' + $script:PwshGuid + '", "name": "PowerShell", "source": "Windows.Terminal.PowershellCore" } ] }' + [Environment]::NewLine +
+                '}'
+            Set-Content -LiteralPath $script:SettingsPath -Value $content -Encoding utf8
+        }
+
+        It 'recognises the pwsh profile by its name and makes no change' {
+            Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 6>$null
+
+            (Get-Content $script:SettingsPath -Raw | ConvertFrom-Json).defaultProfile | Should-Be 'PowerShell'
+            @(Get-ChildItem $script:LogDir -Filter '*.json.bak') | Should-BeCollection -Count 0
+        }
+    }
+
+    Context 'A hand-written pwsh profile as the default' {
+
+        BeforeEach {
+            $content = '{' + [Environment]::NewLine +
+                '    "defaultProfile": "{55555555-5555-5555-5555-555555555555}",' + [Environment]::NewLine +
+                '    "profiles": { "list": [' + [Environment]::NewLine +
+                '        { "guid": "' + $script:PwshGuid + '", "source": "Windows.Terminal.PowershellCore" },' + [Environment]::NewLine +
+                '        { "guid": "{55555555-5555-5555-5555-555555555555}", "name": "mine", "commandline": "pwsh.exe -NoLogo" }' + [Environment]::NewLine +
+                '    ] }' + [Environment]::NewLine +
+                '}'
+            Set-Content -LiteralPath $script:SettingsPath -Value $content -Encoding utf8
+        }
+
+        It 'counts a profile whose commandline runs pwsh as PowerShell 7' {
+            Set-PwshAsWindowsTerminalDefault -LogDir $script:LogDir 6>$null
+
+            (Get-Content $script:SettingsPath -Raw | ConvertFrom-Json).defaultProfile | Should-Be '{55555555-5555-5555-5555-555555555555}'
+        }
+    }
+
     Context 'A settings file carrying JSONC comments' {
 
         BeforeEach {
