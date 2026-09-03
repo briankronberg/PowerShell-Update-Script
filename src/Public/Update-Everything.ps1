@@ -1606,7 +1606,15 @@
             if ($AutoReboot)         { $params.AutoReboot      = $true }
             else                     { $params.IgnoreReboot    = $true }
 
-            Get-WindowsUpdate @params
+            # Get-WindowsUpdate returns nothing at all when the scan finds
+            # nothing, and a step that ran for half a minute owes a word on it.
+            $offered = @(Get-WindowsUpdate @params)
+            if ($offered.Count) {
+                $offered
+            } else {
+                $scanned = if ($useMicrosoftUpdate) { 'Windows Update and Microsoft Update' } else { 'Windows Update' }
+                Write-Output "$scanned offered nothing to install."
+            }
         }
     } else {
         Add-SkippedStep -Name 'Windows Update'

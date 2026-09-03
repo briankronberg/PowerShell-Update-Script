@@ -28,7 +28,10 @@ function Get-UpdateToolInventory {
 
         .PARAMETER Catalogue
         The tools to look for. Defaults to the ones this module drives; a test
-        passes its own.
+        passes its own. Each entry names the Command, the VersionArgument that
+        makes it print its version (null to record presence only), and
+        optionally the OutputEncoding the tool writes when it is not the
+        console's, as a name Encoding.GetEncoding accepts.
 
         .EXAMPLE
         Get-UpdateToolInventory | Where-Object Present
@@ -52,7 +55,8 @@ function Get-UpdateToolInventory {
             @{ Name = 'Bun';             Command = 'bun';     VersionArgument = '--version' }
             @{ Name = 'pnpm';            Command = 'pnpm';    VersionArgument = '--version' }
             @{ Name = 'Python launcher'; Command = 'py';      VersionArgument = '--version' }
-            @{ Name = 'Python manager';  Command = 'pymanager'; VersionArgument = '--version' }
+            # pymanager prints its version at the head of help and nothing for --version.
+            @{ Name = 'Python manager';  Command = 'pymanager'; VersionArgument = 'help' }
             @{ Name = 'uv';              Command = 'uv';      VersionArgument = '--version' }
             @{ Name = 'pip';             Command = 'pip';     VersionArgument = '--version' }
             @{ Name = 'pipx';            Command = 'pipx';    VersionArgument = '--version' }
@@ -67,7 +71,8 @@ function Get-UpdateToolInventory {
             @{ Name = 'Google Cloud CLI'; Command = 'gcloud'; VersionArgument = $null }
             @{ Name = 'VS Code';         Command = 'code';    VersionArgument = $null }
             @{ Name = 'MiKTeX';          Command = 'miktex';  VersionArgument = '--version' }
-            @{ Name = 'WSL';             Command = 'wsl';     VersionArgument = $null }
+            # wsl.exe writes UTF-16 to stdout.
+            @{ Name = 'WSL';             Command = 'wsl';     VersionArgument = '--version'; OutputEncoding = 'utf-16' }
         )
     }
 
@@ -97,13 +102,18 @@ function Get-UpdateToolInventory {
         }
 
         # The null version arguments are on purpose. scoop is a PowerShell shim
-        # whose --version runs a git describe against its own repository; wsl
-        # --version writes UTF-16 that arrives as spaced-out characters; az,
+        # whose --version runs a git describe against its own repository; az,
         # gcloud and code each take seconds to answer. Presence is most of the
-        # value, and none of these are worth the wait or the mess.
+        # value, and none of these are worth the wait.
         $version = $null
         if ($tool.VersionArgument) {
+            # Native output is decoded with the console's output encoding, so a
+            # tool that writes another one is read with that one, briefly.
+            $consoleEncoding = [Console]::OutputEncoding
             try {
+                if ($tool.OutputEncoding) {
+                    [Console]::OutputEncoding = [System.Text.Encoding]::GetEncoding($tool.OutputEncoding)
+                }
                 $raw = & $tool.Command $tool.VersionArgument 2>&1
                 $global:LASTEXITCODE = 0
                 $version = @($raw | Out-String -Stream |
@@ -112,6 +122,8 @@ function Get-UpdateToolInventory {
             } catch {
                 Write-Verbose "$($tool.Command) $($tool.VersionArgument) failed: $($_.Exception.Message)"
                 $global:LASTEXITCODE = 0
+            } finally {
+                if ($tool.OutputEncoding) { [Console]::OutputEncoding = $consoleEncoding }
             }
         }
 

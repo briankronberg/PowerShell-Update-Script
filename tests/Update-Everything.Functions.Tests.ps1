@@ -1918,6 +1918,60 @@ Describe 'Get-UpdateToolInventory' -Tag 'Unit' {
         $r.Version | Should-BeNull
         $LASTEXITCODE | Should-Be 0
     }
+
+    # wsl.exe writes UTF-16 to stdout. Decoded as the console's encoding, the
+    # text arrives with a NUL between every character and the version is lost.
+    # A catalogue entry can say what its tool writes.
+    Context 'A tool that writes an encoding the console does not expect' {
+
+        BeforeAll {
+            $script:WideTool = @{
+                Name            = 'Wide'
+                Command         = 'powershell'
+                VersionArgument = @('-NoProfile', '-Command',
+                    '[Console]::OutputEncoding = [System.Text.Encoding]::Unicode; ''Wide version: 1.2.3''')
+                OutputEncoding  = 'utf-16'
+            }
+        }
+
+        It 'reads the version through the encoding the catalogue names' {
+            (Get-UpdateToolInventory -Catalogue @($script:WideTool)).Version | Should-Be 'Wide version: 1.2.3'
+        }
+
+        It 'puts the console encoding back afterwards' {
+            $before = [Console]::OutputEncoding
+            $null = Get-UpdateToolInventory -Catalogue @($script:WideTool)
+
+            [Console]::OutputEncoding.WebName | Should-Be $before.WebName
+        }
+
+        It 'puts it back when the tool cannot start' {
+            Mock Get-Command { [pscustomobject]@{ Source = 'C:\shims\ue-broken-shim.exe' } }
+            $before = [Console]::OutputEncoding
+
+            $null = Get-UpdateToolInventory -Catalogue @(
+                @{ Name = 'Broken'; Command = 'ue-broken-shim-2b9d'; VersionArgument = '--version'; OutputEncoding = 'utf-16' })
+
+            [Console]::OutputEncoding.WebName | Should-Be $before.WebName
+        }
+    }
+
+    Context 'The real catalogue' -Tag 'Static' {
+
+        BeforeAll {
+            $script:InventorySource = Get-Content `
+                (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Get-UpdateToolInventory.ps1') -Raw
+        }
+
+        It 'probes wsl as UTF-16' {
+            $script:InventorySource | Should-MatchString "Command = 'wsl';\s+VersionArgument = '--version'; OutputEncoding = 'utf-16'"
+        }
+
+        # pymanager --version exits 0 and prints nothing; help opens with the version.
+        It 'asks the Python manager for help, where its version is' {
+            $script:InventorySource | Should-MatchString "Command = 'pymanager'; VersionArgument = 'help'"
+        }
+    }
 }
 
 Describe 'Step order' -Tag 'Static' {
@@ -3274,6 +3328,25 @@ Describe 'pip is in the inventory' -Tag 'Unit' {
             (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Get-UpdateToolInventory.ps1') -Raw
 
         $source | Should-MatchString "Name = 'pip';"
+    }
+}
+
+Describe 'The Windows Update step' -Tag 'Static' {
+
+    BeforeAll {
+        $script:Source = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    # Get-WindowsUpdate returns nothing when the scan finds nothing, and the
+    # step used to say nothing with it.
+    It 'says so when nothing was offered' {
+        $script:Source | Should-MatchString ([regex]::Escape('$offered = @(Get-WindowsUpdate @params)'))
+        $script:Source | Should-MatchString 'offered nothing to install'
+    }
+
+    It 'names Microsoft Update in that line only when it was in the scan' {
+        $script:Source | Should-MatchString ([regex]::Escape("if (`$useMicrosoftUpdate) { 'Windows Update and Microsoft Update' } else { 'Windows Update' }"))
     }
 }
 

@@ -46,11 +46,17 @@
     # Stable V5 UUID the PowershellCore generator assigns to the primary pwsh
     # install; used as a fallback if the profile is not yet materialized in the file.
     $wellKnownPwsh = '{574e775e-4f2a-5b96-ac1e-a2962a402336}'
+    # Terminal generates one PowershellCore profile per pwsh install it finds, so
+    # a machine that has carried more than one install has more than one. Every
+    # one of them is PowerShell 7, and a default pointing at any of them stays.
+    $pwshProfiles = @()
     $ps7Guid = $null
     if ($cfg -and $cfg.profiles -and $cfg.profiles.list) {
-        $p = $cfg.profiles.list | Where-Object { $_.source -eq 'Windows.Terminal.PowershellCore' } | Select-Object -First 1
-        if (-not $p) { $p = $cfg.profiles.list | Where-Object { $_.commandline -match 'pwsh' } | Select-Object -First 1 }
-        if ($p -and $p.guid) { $ps7Guid = $p.guid }
+        $generated = @($cfg.profiles.list | Where-Object { $_.source -eq 'Windows.Terminal.PowershellCore' })
+        $handmade  = @($cfg.profiles.list | Where-Object { $_.commandline -match 'pwsh' })
+        $pwshProfiles = $generated + $handmade
+        $p = $pwshProfiles | Where-Object { $_.guid } | Select-Object -First 1
+        if ($p) { $ps7Guid = $p.guid }
     }
     if (-not $ps7Guid) {
         $ps7Guid = $wellKnownPwsh
@@ -68,8 +74,11 @@
         $current = $Matches[1]
     }
 
-    if ($current -eq $ps7Guid) {
-        Write-Output "Default profile is already PowerShell 7 ($ps7Guid). No change needed."
+    # Terminal accepts a profile name here as well as a GUID.
+    $currentIsPwsh = ($current -eq $ps7Guid) -or
+        ($current -and @($pwshProfiles | Where-Object { $_.guid -eq $current -or $_.name -eq $current }).Count)
+    if ($currentIsPwsh) {
+        Write-Output "Default profile is already PowerShell 7 ($current). No change needed."
         return
     }
     Write-Output "Current default profile: $current"
