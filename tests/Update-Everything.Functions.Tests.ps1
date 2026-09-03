@@ -1919,40 +1919,59 @@ Describe 'Get-UpdateToolInventory' -Tag 'Unit' {
         $LASTEXITCODE | Should-Be 0
     }
 
-    # wsl.exe writes UTF-16 to stdout. Decoded as the console's encoding, the
-    # text arrives with a NUL between every character and the version is lost.
-    # A catalogue entry can say what its tool writes.
-    Context 'A tool that writes an encoding the console does not expect' {
+    # Most entries name no Environment at all, and the probe must still read
+    # their version; an entry with none is the common case, not an edge.
+    It 'reads the version of a tool that names no environment' {
+        $plain = @{ Name = 'Plain'; Command = 'powershell'
+                    VersionArgument = @('-NoProfile', '-Command', '"Plain version: 7.8.9"') }
+
+        (Get-UpdateToolInventory -Catalogue @($plain)).Version | Should-Be 'Plain version: 7.8.9'
+    }
+
+    # wsl.exe writes UTF-16 in one context and single-byte text in another,
+    # and WSL_UTF8=1 makes it write UTF-8 in both. A catalogue entry can name
+    # variables its tool needs, and they are set for the one call.
+    Context 'A tool that needs an environment variable to answer plainly' {
 
         BeforeAll {
-            $script:WideTool = @{
-                Name            = 'Wide'
+            $script:EnvTool = @{
+                Name            = 'Env'
                 Command         = 'powershell'
-                VersionArgument = @('-NoProfile', '-Command',
-                    '[Console]::OutputEncoding = [System.Text.Encoding]::Unicode; ''Wide version: 1.2.3''')
-                OutputEncoding  = 'utf-16'
+                VersionArgument = @('-NoProfile', '-Command', '"Env version: $env:UE_PROBE_VARIABLE"')
+                Environment     = @{ UE_PROBE_VARIABLE = '4.5.6' }
             }
         }
 
-        It 'reads the version through the encoding the catalogue names' {
-            (Get-UpdateToolInventory -Catalogue @($script:WideTool)).Version | Should-Be 'Wide version: 1.2.3'
+        AfterEach {
+            [Environment]::SetEnvironmentVariable('UE_PROBE_VARIABLE', $null)
         }
 
-        It 'puts the console encoding back afterwards' {
-            $before = [Console]::OutputEncoding
-            $null = Get-UpdateToolInventory -Catalogue @($script:WideTool)
-
-            [Console]::OutputEncoding.WebName | Should-Be $before.WebName
+        It 'the tool sees the variable' {
+            (Get-UpdateToolInventory -Catalogue @($script:EnvTool)).Version | Should-Be 'Env version: 4.5.6'
         }
 
-        It 'puts it back when the tool cannot start' {
+        It 'the variable is gone afterwards when it was not set before' {
+            $null = Get-UpdateToolInventory -Catalogue @($script:EnvTool)
+
+            # A removed variable reads back as an empty string on this side.
+            [string][Environment]::GetEnvironmentVariable('UE_PROBE_VARIABLE') | Should-Be ''
+        }
+
+        It 'a value that was set before comes back' {
+            [Environment]::SetEnvironmentVariable('UE_PROBE_VARIABLE', 'mine')
+            $null = Get-UpdateToolInventory -Catalogue @($script:EnvTool)
+
+            [Environment]::GetEnvironmentVariable('UE_PROBE_VARIABLE') | Should-Be 'mine'
+        }
+
+        It 'comes back when the tool cannot start' {
             Mock Get-Command { [pscustomobject]@{ Source = 'C:\shims\ue-broken-shim.exe' } }
-            $before = [Console]::OutputEncoding
 
             $null = Get-UpdateToolInventory -Catalogue @(
-                @{ Name = 'Broken'; Command = 'ue-broken-shim-2b9d'; VersionArgument = '--version'; OutputEncoding = 'utf-16' })
+                @{ Name = 'Broken'; Command = 'ue-broken-shim-2b9d'; VersionArgument = '--version'; Environment = @{ UE_PROBE_VARIABLE = 'x' } })
 
-            [Console]::OutputEncoding.WebName | Should-Be $before.WebName
+            # A removed variable reads back as an empty string on this side.
+            [string][Environment]::GetEnvironmentVariable('UE_PROBE_VARIABLE') | Should-Be ''
         }
     }
 
@@ -1963,8 +1982,8 @@ Describe 'Get-UpdateToolInventory' -Tag 'Unit' {
                 (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Private\Get-UpdateToolInventory.ps1') -Raw
         }
 
-        It 'probes wsl as UTF-16' {
-            $script:InventorySource | Should-MatchString "Command = 'wsl';\s+VersionArgument = '--version'; OutputEncoding = 'utf-16'"
+        It 'probes wsl with WSL_UTF8 set' {
+            $script:InventorySource | Should-MatchString "Command = 'wsl';\s+VersionArgument = '--version'; Environment = @\{ WSL_UTF8 = '1' \}"
         }
 
         # pymanager --version exits 0 and prints nothing; help opens with the version.
