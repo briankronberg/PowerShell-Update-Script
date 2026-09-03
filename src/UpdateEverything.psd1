@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.7.1'
+    ModuleVersion     = '1.7.2'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -33,27 +33,24 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.7.1
+            ReleaseNotes = '# 1.7.2
 
-One fix, for machines that install the module for all users.
+Fixes from a standards-and-spec review of everything since 1.5.0.
 
-## The self-update sees the machine-wide receipt
+## The advice matches the receipts
 
-Get-InstalledPSResource without -Scope reads only the per-user paths, so a
-copy installed with Install-PSResource -Scope AllUsers -- receipt on disk,
-returned by the AllUsers query -- reported no gallery lineage at all. Once
-the gallery moved ahead, the self step would have called it a copy the
-gallery did not install.
+The status behind the version banner reports which gallery client holds the
+receipts on this machine, and the advice follows it: a PSResourceGet lineage
+the gallery cannot move is pointed at "Install-PSResource UpdateEverything
+-Reinstall" rather than at Install-Module, which answers a different
+lineage.
 
-The status now asks PSResourceGet both ways and carries the scope of the
-covering receipt. The self step targets that scope: elevated,
-Update-PSResource runs with -Scope AllUsers; unelevated, the step reports
-the elevation need up front instead of calling at all, because
-Update-PSResource would not refuse -- its CurrentUser default would quietly
-install the new version per-user beside the all-users copy.
+## Robustness
 
-A per-user receipt wins when both scopes cover: that copy shadows the
-machine one in PSModulePath order, and moving it needs no elevation.
+Both Update-PSResource calls pass -AcceptLicense, so a module that requires
+accepting a license cannot stall an unattended run. The Python launcher
+probe says through Write-Verbose what it swallowed when a py that resolves
+cannot start.
 '
 
         }
