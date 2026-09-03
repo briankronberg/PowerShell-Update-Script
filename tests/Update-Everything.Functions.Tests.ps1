@@ -1006,29 +1006,87 @@ Describe 'The PowerShellGet upgrade offer' -Tag 'Static' {
     }
 }
 
-Describe 'The summary says notifications were not requested' -Tag 'Static' {
+Describe 'Notifications are on by default' -Tag 'Static' {
 
-    # -Notify defaults to off, so a run that does not pass it never reaches
-    # Initialize-NotificationSupport and never offers to install BurntToast.
-    # That is correct, but the run said nothing at all about it, which reads as
-    # a broken feature rather than an unrequested one, and sends people looking
-    # for a consent prompt that was never going to appear.
+    # A run that did not pass -Notify still notifies when it can. When it
+    # cannot, the summary says so in one quiet line and offers no install: a
+    # default must not nag. A run that asked for -Notify keeps the warning.
 
-    It 'reports the unrequested case rather than staying silent' {
-        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw |
-            Should-MatchString 'Notifications: not requested'
+    BeforeAll {
+        $script:Source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
     }
 
-    It 'names the switch that turns them on' {
-        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw |
-            Should-MatchString 'Notifications: not requested[^\r\n]*-Notify'
+    # Still a switch, so the bare -Notify that every task registered by 1.7.x
+    # passes keeps working; only "not passed at all" changed meaning.
+    It 'keeps -Notify a switch and turns it on when it was not passed' {
+        $script:Source | Should-MatchString ([regex]::Escape('[switch] $Notify,'))
+        $script:Source | Should-MatchString ([regex]::Escape('if ($notifyImplied) { $Notify = $true }'))
     }
 
-    # The existing branch reports notifications that were asked for and could not
-    # be sent. This must not swallow it.
-    It 'still reports notifications that were requested but unavailable' {
-        Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw |
-            Should-MatchString 'Notifications were requested but could not be sent'
+    It 'tells the notification setup whether -Notify was implied' {
+        $script:Source | Should-MatchString ([regex]::Escape('$notifyImplied = -not $PSBoundParameters.ContainsKey(''Notify'')'))
+        $script:Source | Should-MatchString ([regex]::Escape('Initialize-NotificationSupport -Approved $AllowInstall -Implied:$notifyImplied'))
+    }
+
+    It 'notes, quietly, when the default could not notify' {
+        $script:Source | Should-MatchString 'Notifications: none sent;'
+    }
+
+    It 'still warns when notifications were asked for and could not be sent' {
+        $script:Source | Should-MatchString 'Notifications were requested but could not be sent'
+    }
+
+    It 'no longer tells a run that turned them off to turn them on' {
+        $script:Source | Should-NotMatchString 'Notifications: not requested'
+    }
+}
+
+Describe 'Wait-AttendedExit' -Tag 'Unit' {
+
+    It 'does not hold a session that cannot prompt, and says so' {
+        Mock Test-CanPrompt { $false }
+
+        $warnings = @(Wait-AttendedExit -TimeoutSeconds 60 3>&1)
+
+        "$($warnings -join ' ')" | Should-MatchString 'cannot prompt'
+    }
+
+    # With a keyboard the host cannot read, the hold falls out through its catch
+    # or its timeout. Either way it returns, which is the property that matters:
+    # nothing here may hang a run.
+    It 'returns within its timeout' {
+        Mock Test-CanPrompt { $true }
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+        Wait-AttendedExit -TimeoutSeconds 1 3>$null 6>$null
+
+        $sw.Elapsed.TotalSeconds | Should-BeLessThan 10
+    }
+}
+
+Describe 'The attended hold' -Tag 'Static' {
+
+    BeforeAll {
+        $script:Source = Get-Content (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    # After the summary so there is something to read; before the transcript
+    # closes so the hold is on record.
+    It 'sits after the Finished line and before the transcript closes' {
+        $hold     = $script:Source.IndexOf('Wait-AttendedExit -TimeoutSeconds $holdSeconds')
+        $finished = $script:Source.IndexOf('Write-Host "Finished $(Get-Date)')
+        $close    = $script:Source.LastIndexOf('Stop-Transcript')
+
+        $hold | Should-BeGreaterThan $finished
+        $hold | Should-BeLessThan $close
+    }
+
+    It 'is bounded by -PromptTimeoutSeconds when given, and ten minutes otherwise' {
+        $script:Source | Should-MatchString ([regex]::Escape("if (`$PSBoundParameters.ContainsKey('PromptTimeoutSeconds')) { `$PromptTimeoutSeconds } else { 600 }"))
+    }
+
+    It 'only holds when -Attended was passed' {
+        $script:Source | Should-MatchString ([regex]::Escape('if ($Attended) {'))
     }
 }
 

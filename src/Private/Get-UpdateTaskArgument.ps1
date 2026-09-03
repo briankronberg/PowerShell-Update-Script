@@ -37,7 +37,8 @@ function Get-UpdateTaskArgument {
     )
 
     $call = 'Update-Everything'
-    if ($Notify) { $call += ' -Notify' }
+    # Update-Everything notifies by default, so turning it off has to be said.
+    if ($Notify) { $call += ' -Notify' } else { $call += ' -Notify:$false' }
     if ($PromptBeforeRun) { $call += " -PromptBeforeRun -PromptTimeoutSeconds $PromptTimeoutSeconds" }
     if ($AllowInstall) {
         $call += ' -AllowInstall ' + (($AllowInstall | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ',')

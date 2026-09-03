@@ -277,8 +277,10 @@ Describe 'Get-UpdateTaskArgument' -Tag 'Unit' {
         Get-UpdateTaskArgument -ModuleRoot 'C:\x' | Should-MatchString '-Notify'
     }
 
-    It 'omits notifications when they are turned off' {
-        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -Notify $false | Should-NotMatchString '-Notify'
+    # Update-Everything notifies by default, so leaving -Notify out would turn
+    # them back on.
+    It 'says notifications are off when they are turned off' {
+        Get-UpdateTaskArgument -ModuleRoot 'C:\x' -Notify $false | Should-MatchString ([regex]::Escape('-Notify:$false'))
     }
 
     It 'quotes each approval so the child parses them as a list' {
@@ -398,6 +400,18 @@ Describe 'Registration refusals' -Tag 'Unit' {
         $everything = @(Register-UpdateEverythingTask 3>&1)
 
         "$($everything -join ' ')" | Should-MatchString 'notify nobody'
+    }
+
+    # A task has nobody at the window, so -Attended in -ExtraArgument would hold
+    # every run open until the hold timed out.
+    It 'warns when the task would hold the window for nobody' {
+        Mock Test-IsAdministrator { $true }
+        Mock Test-NotificationModuleAvailable { $true }
+        Mock Register-ScheduledTask { [pscustomobject]@{ TaskName = $TaskName } }
+
+        $everything = @(Register-UpdateEverythingTask -ExtraArgument '-Attended' 3>&1)
+
+        "$($everything -join ' ')" | Should-MatchString 'nobody at the window'
     }
 }
 

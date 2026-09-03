@@ -140,6 +140,58 @@ Describe 'Initialize-NotificationSupport' -Tag 'Unit','Notification' {
     }
 }
 
+Describe 'Initialize-NotificationSupport when notifications are implied' -Tag 'Unit','Notification' {
+
+    # Update-Everything notifies by default. A default that warned, or offered
+    # an install, on every run of a machine without BurntToast would be a nag,
+    # so the implied path reports quietly and installs only when -AllowInstall
+    # names the module.
+
+    Context 'No interactive session' {
+
+        BeforeEach { Mock Test-InteractiveSession { $false } }
+
+        It 'reports unavailable without a warning' {
+            $warnings = @()
+            $result = Initialize-NotificationSupport -Implied -WarningVariable warnings
+
+            $result.Available | Should-BeFalse
+            @($warnings) | Should-BeCollection -Count 0
+        }
+    }
+
+    Context 'BurntToast missing' {
+
+        BeforeEach {
+            Mock Test-InteractiveSession { $true }
+            Mock Get-Module { } -ParameterFilter { $Name -eq 'BurntToast' }
+            Mock Test-CanPrompt { $true }
+            Mock Request-InstallConsent { $true }
+            Mock Install-Module { }
+        }
+
+        It 'does not ask, and does not install' {
+            $result = Initialize-NotificationSupport -Implied
+
+            $result.Available | Should-BeFalse
+            Should-NotInvoke Request-InstallConsent
+            Should-NotInvoke Install-Module
+        }
+
+        It 'returns a reason that says how to get a toast' {
+            (Initialize-NotificationSupport -Implied).Reason | Should-MatchString 'Install-Module BurntToast'
+        }
+
+        It 'still installs when -AllowInstall names the module' {
+            Mock Import-Module { } -ParameterFilter { $Name -eq 'BurntToast' }
+
+            $null = Initialize-NotificationSupport -Implied -Approved @('BurntToast') 6>$null
+
+            Should-Invoke Install-Module -Times 1 -Exactly -ParameterFilter { $Name -eq 'BurntToast' }
+        }
+    }
+}
+
 Describe 'Send-UpdateNotification' -Tag 'Unit','Notification' {
 
     BeforeEach {

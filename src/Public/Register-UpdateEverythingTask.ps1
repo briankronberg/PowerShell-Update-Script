@@ -181,6 +181,12 @@
         -AllowInstall $AllowInstall -Tag $Tag -ExcludeTag $ExcludeTag `
         -ExtraArgument $ExtraArgument
 
+    # A task has nobody at the window, so an -Attended run would hold every
+    # window open until the hold timed out.
+    if (@($ExtraArgument | Where-Object { $_ -match '^-Attended(:|$)' }).Count) {
+        Write-Warning 'The task passes -Attended, and a scheduled run has nobody at the window. Each run will hold its window open until the hold times out.'
+    }
+
     $action = New-ScheduledTaskAction -Execute (Get-PowerShellHostPath) -Argument $arguments
 
     $trigger = New-UpdateTaskTrigger -Cadence $Cadence -DayOfWeek $DayOfWeek -At $At `

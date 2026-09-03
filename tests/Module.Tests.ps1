@@ -26,6 +26,7 @@ BeforeDiscovery {
         @{ Name = 'UpdateGlobalNpm';           TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'SkipElevation';             TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'Notify';                    TypeName = 'switch';   Type = [switch];   Default = $null }
+        @{ Name = 'Attended';                  TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'AllowInstall';              TypeName = 'string[]'; Type = [string[]]; Default = '@()' }
         @{ Name = 'Tag';                       TypeName = 'string[]'; Type = [string[]]; Default = '@()' }
         @{ Name = 'ExcludeTag';                TypeName = 'string[]'; Type = [string[]]; Default = '@()' }
@@ -37,11 +38,11 @@ BeforeDiscovery {
         @{ Name = 'UpdateSelfSource';          TypeName = 'string';   Type = [string];   Default = "'Gallery'" }
     )
 
-    # Each of these either reboots the machine, moves pinned toolchains, or
-    # reaches out to the gallery, so turning one on has to be deliberate.
+    # Each of these either reboots the machine, moves pinned toolchains, reaches
+    # out to the gallery, or holds a window, so turning one on has to be deliberate.
     $DefaultOffSwitches = @(
         'AutoReboot', 'IncludePrerelease', 'UpdateGlobalNpm', 'SkipElevation',
-        'Notify', 'PromptBeforeRun', 'UpdateSelf'
+        'PromptBeforeRun', 'UpdateSelf', 'Attended'
     )
 
     # Steps that cannot work unelevated, and so must carry -RequiresAdmin.
@@ -492,7 +493,7 @@ Describe 'Update-Everything' -Tag 'Static' {
 
         It 'declares no parameters beyond the documented contract' {
             $script:DeclaredParameters.Name.VariablePath.UserPath |
-                Should-BeCollection -Count 18 -Because 'a new parameter needs docs and a test'
+                Should-BeCollection -Count 19 -Because 'a new parameter needs docs and a test'
         }
 
         It 'bounds -LogRetentionDays with ValidateRange' {

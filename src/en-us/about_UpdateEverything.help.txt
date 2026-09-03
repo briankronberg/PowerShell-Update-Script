@@ -49,10 +49,15 @@ INSTALLING VERSUS UPDATING
     NuGetProvider and BurntToast.
 
 NOTIFICATIONS
-    -Notify raises a toast when the run finishes, and a separate urgent one
-    when a restart is pending. It needs the BurntToast module and an
-    interactive desktop session. Neither is required: without them the run
-    proceeds and says so.
+    A run raises a toast when it finishes, and a separate urgent one when a
+    restart is pending. -Notify:$false turns them off. They need the
+    BurntToast module and an interactive desktop session. Neither is
+    required: without them the run proceeds and says so, in one line when
+    -Notify was not asked for.
+
+    -Attended holds the window open after the summary until a key is
+    pressed, for a run started from a shortcut. It closes on its own after
+    -PromptTimeoutSeconds when given, otherwise ten minutes.
 
     A task running as SYSTEM cannot show a notification, which is why
     Register-UpdateEverythingTask registers the task to run as you.
