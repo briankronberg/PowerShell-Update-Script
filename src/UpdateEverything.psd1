@@ -1,6 +1,6 @@
 ﻿@{
     RootModule        = 'UpdateEverything.psm1'
-    ModuleVersion     = '1.8.0'
+    ModuleVersion     = '1.9.0'
     GUID              = 'e4e1f3eb-5967-4311-94af-c650fe192e95'
     Author            = 'Brian Kronberg'
     Copyright         = '(c) 2026 Brian Kronberg. Released under the MIT License.'
@@ -33,48 +33,22 @@
             Tags         = @('Windows', 'Update', 'Maintenance', 'winget', 'WindowsUpdate', 'Chocolatey', 'Scoop', 'ScheduledTask', 'PSEdition_Desktop', 'PSEdition_Core')
             LicenseUri   = 'https://github.com/briankronberg/UpdateEverything/blob/main/LICENSE'
             ProjectUri   = 'https://github.com/briankronberg/UpdateEverything'
-            ReleaseNotes = '# 1.8.0
+            ReleaseNotes = '# 1.9.0
 
-Three additions from comparing this module with a smaller daily-update
-script, and one fix since 1.7.3.
+## Each step can have a budget
 
-## Notifications are on by default
+A step that hangs -- winget waiting on a dialog nobody sees -- used to run
+until Task Scheduler stopped the whole process at the execution time limit,
+with no summary, no toast and no reboot check. -StepTimeoutMinutes, on both
+Update-Everything and Register-UpdateEverythingTask, puts a budget on each
+step. When a step runs past it, the processes it started are stopped, the
+step is recorded as Failed with the reason, and the run continues. Off by
+default.
 
-A run now raises its toasts without being asked. -Notify:$false turns them
-off. -Notify stays a switch, so every task registered by an earlier version
-keeps working unchanged; what changed is that not passing it means on. When
-BurntToast is not installed and -Notify was not passed, the closing summary
-says so in one line and offers nothing for install, so the default cannot
-nag. A run that passed -Notify keeps the warning and the consent prompt.
-
-## -Attended holds the window
-
-A run started from a shortcut or a Start-menu pin closes its window before
-the summary can be read. -Attended holds it until a key is pressed, and
-closes on its own after -PromptTimeoutSeconds when given, otherwise ten
-minutes. The default stays unattended; a task carrying -Attended in
--ExtraArgument is warned at registration.
-
-## PATH is refreshed between steps
-
-A step that installs a manager changes the machine or user PATH, and the
-process used to keep the PATH it started with, so the new tool was found by
-the next run. The run now re-reads both hives after each step and says
-"PATH gained: ..." when there is anything to say. Entries this session added
-itself stay in front.
-
-## A run that did not finish is reported
-
-A run stopped by the task execution time limit, or by a closed window, left
-a transcript that simply stopped. The next run reads it and warns at the
-top, naming when it started, its last step and the file. Registering a task
-prints the time limit alongside the schedule.
-
-## Fixes
-
-The Inventory row for WSL read as garbage inside a run: wsl.exe writes
-UTF-16 from a bare shell and single-byte text inside a run. The probe now
-sets WSL_UTF8=1 for the one call, which makes it write UTF-8 in both.
+Steps run in-process, so the budget is enforced by a watchdog thread that
+stops the child processes of the step. A step that hangs inside a cmdlet in
+this process, such as a Windows Update scan that never returns, has no child
+to stop and is not helped; the execution time limit remains the backstop.
 '
 
         }
