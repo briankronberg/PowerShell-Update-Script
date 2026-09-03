@@ -34,6 +34,7 @@ BeforeDiscovery {
         @{ Name = 'PromptTimeoutSeconds';      TypeName = 'int';      Type = [int];      Default = '60' }
         @{ Name = 'DelayMinutes';              TypeName = 'int';      Type = [int];      Default = '60' }
         @{ Name = 'LogRetentionDays';          TypeName = 'int';      Type = [int];      Default = '30' }
+        @{ Name = 'StepTimeoutMinutes';        TypeName = 'int';      Type = [int];      Default = '0' }
         @{ Name = 'UpdateSelf';                TypeName = 'switch';   Type = [switch];   Default = $null }
         @{ Name = 'UpdateSelfSource';          TypeName = 'string';   Type = [string];   Default = "'Gallery'" }
     )
@@ -493,7 +494,7 @@ Describe 'Update-Everything' -Tag 'Static' {
 
         It 'declares no parameters beyond the documented contract' {
             $script:DeclaredParameters.Name.VariablePath.UserPath |
-                Should-BeCollection -Count 19 -Because 'a new parameter needs docs and a test'
+                Should-BeCollection -Count 20 -Because 'a new parameter needs docs and a test'
         }
 
         It 'bounds -LogRetentionDays with ValidateRange' {
@@ -911,7 +912,7 @@ Describe 'Variable hygiene' -Tag 'Static' {
             # Set by the module loader, and by the caller of a private helper.
             'ModuleRoot', 'Results', 'logDir', 'runStamp', 'isAdmin', 'InstallDecision',
             'NotificationsAvailable', 'WingetNothingToDo', 'TagFilter', 'ExcludeTagFilter',
-            'RefreshPathAfterStep'
+            'RefreshPathAfterStep', 'StepTimeoutSeconds'
         )
 
         $bare = { param($p) ($p -replace '^(script|global|local|private):', '') }

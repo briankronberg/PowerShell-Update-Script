@@ -454,6 +454,43 @@ Describe 'Invoke-Step' -Tag 'Unit' {
         }
     }
 
+    Context 'A step that outlives its budget' {
+
+        # The budget is enforced by a watchdog on another thread that stops the
+        # step's child processes, so the hung command here is a real child:
+        # cmd running ping for half a minute.
+
+        BeforeEach { $script:StepTimeoutSeconds = 2 }
+        AfterEach  { $script:StepTimeoutSeconds = 0 }
+
+        It 'stops the child, fails the step, and says why' {
+            $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+            Invoke-Step -Name 'slow' -Action { & cmd /c 'ping -n 30 127.0.0.1 >nul' } 3>$null 6>$null
+
+            $sw.Elapsed.TotalSeconds | Should-BeLessThan 20
+            $script:Results[0].Status | Should-Be 'Failed'
+            Get-Content (Join-Path $script:logDir 'slow-teststamp.log') -Raw |
+                Should-MatchString 'Exceeded the step timeout of 2 seconds; stopped: '
+        }
+
+        It 'leaves a step that finishes in time alone' {
+            Invoke-Step -Name 'quick' -Action { 'work' } 6>$null
+
+            $script:Results[0].Status | Should-Be 'OK'
+        }
+
+        # A budget of zero is the default and means no watchdog at all.
+        It 'arms nothing when the budget is zero' {
+            $script:StepTimeoutSeconds = 0
+            Mock Start-StepWatchdog { throw 'should not be armed' }
+
+            Invoke-Step -Name 'plain' -Action { 'work' } 6>$null
+
+            $script:Results[0].Status | Should-Be 'OK'
+        }
+    }
+
     Context 'A step whose tool is missing' {
 
         It 'skips when RequiresCommand cannot be resolved' {
@@ -2259,6 +2296,41 @@ Describe 'The run reports a previous run that did not finish' -Tag 'Static' {
 
     It 'says it as a warning, so it stands out in the transcript' {
         $script:Source | Should-MatchString ([regex]::Escape('if ($unfinished) { Write-Warning $unfinished }'))
+    }
+}
+
+Describe 'Start-StepWatchdog and Stop-StepWatchdog' -Tag 'Unit' {
+
+    It 'returns a watchdog that has not fired' {
+        $w = Start-StepWatchdog -TimeoutSeconds 60
+        try {
+            $w | Should-NotBeNull
+            $w.State.Fired | Should-BeFalse
+        } finally {
+            Stop-StepWatchdog -Watchdog $w
+        }
+    }
+
+    # Stop interrupts the sleep, so a run pays nothing for a watchdog that
+    # never fired.
+    It 'stops at once when disarmed early' {
+        $w = Start-StepWatchdog -TimeoutSeconds 60
+        $sw = [System.Diagnostics.Stopwatch]::StartNew()
+
+        Stop-StepWatchdog -Watchdog $w
+
+        $sw.Elapsed.TotalSeconds | Should-BeLessThan 5
+        $w.State.Fired | Should-BeFalse
+    }
+
+    It 'records that it fired when the budget runs out' {
+        $w = Start-StepWatchdog -TimeoutSeconds 1
+        try {
+            Start-Sleep -Seconds 4
+            $w.State.Fired | Should-BeTrue
+        } finally {
+            Stop-StepWatchdog -Watchdog $w
+        }
     }
 }
 

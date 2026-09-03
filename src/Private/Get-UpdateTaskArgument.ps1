@@ -33,6 +33,8 @@ function Get-UpdateTaskArgument {
 
         [string[]] $ExcludeTag = @(),
 
+        [int] $StepTimeoutMinutes = 0,
+
         [string[]] $ExtraArgument = @()
     )
 
@@ -48,6 +50,7 @@ function Get-UpdateTaskArgument {
             $call += " -$($set.Name) " + (($set.Value | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ',')
         }
     }
+    if ($StepTimeoutMinutes -gt 0) { $call += " -StepTimeoutMinutes $StepTimeoutMinutes" }
     if ($ExtraArgument) { $call += ' ' + ($ExtraArgument -join ' ') }
 
     # The manifest, not the folder holding it. Given a directory, Import-Module
