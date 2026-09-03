@@ -2153,6 +2153,115 @@ Describe 'The run refreshes PATH between steps' -Tag 'Static' {
     }
 }
 
+Describe 'Get-UnfinishedRunNote' -Tag 'Unit' {
+
+    # Transcripts are written by hand into TestDrive, so nothing here depends on
+    # the machine's real log directory.
+
+    BeforeEach {
+        $script:Logs = Join-Path $TestDrive ('logs-' + [guid]::NewGuid().ToString('N'))
+        $null = New-Item -ItemType Directory -Path $script:Logs
+        $script:Current = Join-Path $script:Logs 'Update-Everything-20260902-120000.log'
+        Set-Content -LiteralPath $script:Current -Value 'Maintenance run started 09/02/2026 12:00:00  |  Admin: True  |  Main Log: x'
+
+        $script:WriteLog = {
+            param($Stamp, $Lines)
+            Set-Content -LiteralPath (Join-Path $script:Logs "Update-Everything-$Stamp.log") -Value ($Lines -join [Environment]::NewLine)
+        }
+    }
+
+    It 'says nothing when there is no previous run' {
+        Get-UnfinishedRunNote -LogDirectory $script:Logs -CurrentLog $script:Current | Should-BeNull
+    }
+
+    It 'says nothing about a run that finished' {
+        & $script:WriteLog '20260902-110000' @(
+            'Maintenance run started 09/02/2026 11:00:00  |  Admin: True  |  Main Log: x'
+            '=== STARTING: Inventory ==='
+            'Finished 09/02/2026 11:05:00. Detailed logs saved to: x'
+        )
+
+        Get-UnfinishedRunNote -LogDirectory $script:Logs -CurrentLog $script:Current | Should-BeNull
+    }
+
+    It 'names the run and its last step when the transcript just stops' {
+        & $script:WriteLog '20260902-110000' @(
+            'Maintenance run started 09/02/2026 11:00:00  |  Admin: True  |  Main Log: x'
+            '=== STARTING: Inventory ==='
+            'COMPLETED: Inventory (5 s)'
+            '=== STARTING: winget (all sources) ==='
+            'Downloading...'
+        )
+
+        $note = Get-UnfinishedRunNote -LogDirectory $script:Logs -CurrentLog $script:Current
+
+        $note | Should-MatchString 'started 09/02/2026 11:00:00'
+        $note | Should-MatchString ([regex]::Escape("last step was 'winget (all sources)'"))
+        $note | Should-MatchString ([regex]::Escape('Update-Everything-20260902-110000.log'))
+    }
+
+    # A parent that handed off did its work in the child's transcript.
+    It 'does not blame a parent that handed off to an elevated child' {
+        & $script:WriteLog '20260902-110000' @(
+            'Maintenance run started 09/02/2026 11:00:00  |  Admin: False  |  Main Log: x'
+            'Handing off to an elevated run. Its transcript is a separate Update-Everything-*.log'
+        )
+
+        Get-UnfinishedRunNote -LogDirectory $script:Logs -CurrentLog $script:Current | Should-BeNull
+    }
+
+    It 'does not blame a run that was skipped at the prompt' {
+        & $script:WriteLog '20260902-110000' @(
+            'Maintenance run started 09/02/2026 11:00:00  |  Admin: True  |  Main Log: x'
+            'Skipped at your request. Nothing was changed.'
+        )
+
+        Get-UnfinishedRunNote -LogDirectory $script:Logs -CurrentLog $script:Current | Should-BeNull
+    }
+
+    # Only the newest previous transcript is read: an old unfinished run has
+    # already been reported by the run after it.
+    It 'reads only the newest previous transcript' {
+        & $script:WriteLog '20260902-100000' @(
+            'Maintenance run started 09/02/2026 10:00:00  |  Admin: True  |  Main Log: x'
+            '=== STARTING: Inventory ==='
+        )
+        & $script:WriteLog '20260902-110000' @(
+            'Maintenance run started 09/02/2026 11:00:00  |  Admin: True  |  Main Log: x'
+            'Finished 09/02/2026 11:05:00. Detailed logs saved to: x'
+        )
+
+        Get-UnfinishedRunNote -LogDirectory $script:Logs -CurrentLog $script:Current | Should-BeNull
+    }
+
+    It 'ignores the current run, which has not finished yet either' {
+        Get-UnfinishedRunNote -LogDirectory $script:Logs -CurrentLog $script:Current | Should-BeNull
+    }
+}
+
+Describe 'The run reports a previous run that did not finish' -Tag 'Static' {
+
+    BeforeAll {
+        $script:Source = Get-Content `
+            (Join-Path (Split-Path $PSScriptRoot -Parent) 'src\Public\Update-Everything.ps1') -Raw
+    }
+
+    # At the top of the run, after the banner and before the first step, where
+    # a person reading the transcript looks first.
+    It 'asks after the banner and before the first step' {
+        $note   = $script:Source.IndexOf('Get-UnfinishedRunNote -LogDirectory $logDir -CurrentLog $mainLog')
+        $banner = $script:Source.IndexOf('Write-Host "Maintenance run started')
+        $first  = $script:Source.IndexOf("Invoke-Step -Name 'Inventory'")
+
+        $note | Should-BeGreaterThan $banner
+        $note | Should-BeLessThan $first
+    }
+
+    It 'says it as a warning, so it stands out in the transcript' {
+        $script:Source | Should-MatchString ([regex]::Escape('if ($unfinished) { Write-Warning $unfinished }'))
+    }
+}
+
 Describe 'Step order' -Tag 'Static' {
 
     # The order is a contract, not a preference, so it is asserted rather than

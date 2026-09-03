@@ -236,6 +236,7 @@
     Write-Host "  Runs as  : $([Security.Principal.WindowsIdentity]::GetCurrent().Name), elevated, while logged on"
     $windowNote = if ($PromptBeforeRun) { ", prompting first (${PromptTimeoutSeconds}s to answer)" } else { '' }
     Write-Host "  Window   : ${effectiveWindowStyle}${windowNote}"
+    Write-Host "  Limit    : $ExecutionTimeLimitHours hour(s), after which Task Scheduler stops the run; the next run says so"
     Write-Host ''
     Write-Host '  The task runs only while you are logged on, so that it can show notifications.'
     Write-Host '  A run missed while the machine was off happens shortly after your next logon.'
