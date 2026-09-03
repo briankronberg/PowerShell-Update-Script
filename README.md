@@ -215,6 +215,22 @@ Run without elevating, reporting admin-only steps as skipped:
 Update-Everything -SkipElevation
 ```
 
+### Tools installed during a run
+
+A step that installs a package manager changes the machine or user `PATH`, and
+a process normally keeps the `PATH` it started with. The run re-reads both from
+the registry after each step, so a manager installed by one step is found by
+the steps after it rather than by the next run. Each step that gains something
+says so:
+
+```
+PATH gained: C:\ProgramData\chocolatey\bin
+```
+
+Entries this session added itself, such as an activated virtual environment,
+stay where they are, ahead of everything else. The Inventory step runs before
+any of this and stays a picture of the machine as the run found it.
+
 ### What it returns
 
 `Update-Everything` hands back an object rather than exiting. As a script it
